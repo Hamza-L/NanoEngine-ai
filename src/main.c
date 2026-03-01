@@ -3,6 +3,18 @@
 #include "ne_renderer.h"
 #include "ne_window.h"
 
+/*
+ * Cross-platform tiny yield used only in the "no renderer" fallback loop.
+ * On macOS this is a no-op to keep behavior identical to the existing demo.
+ */
+#if defined(_WIN32)
+#define WIN32_LEAN_AND_MEAN
+#include <windows.h>
+#define NE_PLATFORM_YIELD_MS_1() Sleep(1)
+#else
+#define NE_PLATFORM_YIELD_MS_1() ((void)0)
+#endif
+
 static void on_close(NEWindow *window, void *user_data) {
     (void)window;
     (void)user_data;
@@ -57,7 +69,7 @@ int main(void) {
     }
 
     const NEWindowDesc desc = {
-        .title = "NanoEngine - Metal",
+        .title = "NanoEngine",
         .x = 100,
         .y = 100,
         .width = 1280,
@@ -89,34 +101,40 @@ int main(void) {
         .enable_validation = true,
     };
     NERenderer *renderer = ne_renderer_create(app, &renderer_desc);
-    if (!renderer) {
-        NE_LOG_ERROR("failed to create renderer");
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
 
     const NERenderSurfaceDesc surface_desc = {
         .vsync = true,
         .clear_color_rgba = {0.1f, 0.1f, 0.2f, 1.0f},
     };
-    NERenderSurface *surface = ne_renderer_create_surface(renderer, window, &surface_desc);
-    if (!surface) {
-        NE_LOG_ERROR("failed to create render surface");
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
+
+    NERenderSurface *surface = NULL;
+    if (renderer) {
+        surface = ne_renderer_create_surface(renderer, window, &surface_desc);
+        if (!surface) {
+            NE_LOG_ERROR("failed to create render surface (continuing without renderer)");
+            ne_renderer_destroy(renderer);
+            renderer = NULL;
+        }
+    } else {
+        NE_LOG_WARN("renderer not available; running window-only loop");
     }
 
     while (ne_window_is_open(window) && ne_app_poll_events(app)) {
-        if (ne_renderer_begin_frame(renderer, surface)) {
-            ne_renderer_end_frame(renderer, surface);
+        if (renderer && surface) {
+            if (ne_renderer_begin_frame(renderer, surface)) {
+                ne_renderer_end_frame(renderer, surface);
+            }
+        } else {
+            NE_PLATFORM_YIELD_MS_1();
         }
     }
 
-    ne_renderer_destroy_surface(renderer, surface);
-    ne_renderer_destroy(renderer);
+    if (renderer && surface) {
+        ne_renderer_destroy_surface(renderer, surface);
+    }
+    if (renderer) {
+        ne_renderer_destroy(renderer);
+    }
 
     ne_window_destroy(window);
     ne_app_destroy(app);
