@@ -10,12 +10,13 @@
 #include <string.h>
 
 struct NEApp {
-    bool initialized;
-    bool running;
-    uint32_t window_count;
-
     HINSTANCE hinstance;
     ATOM window_class;
+
+    uint32_t window_count;
+
+    bool initialized;
+    bool running;
 };
 
 static struct {
@@ -502,6 +503,7 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
         style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
     }
 
+    // adjusts the size of the window by adding the size of decorators and border so the client area is the actual area given
     RECT r = {0, 0, desc->width, desc->height};
     AdjustWindowRect(&r, style, FALSE);
     const int win_w = (int)(r.right - r.left);

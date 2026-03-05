@@ -28,13 +28,16 @@ typedef struct NERenderSurface NERenderSurface;
 typedef enum NERenderBackend {
     /** Apple Metal backend (macOS). */
     NE_RENDER_BACKEND_METAL = 0,
+
+    /** Vulkan backend (Windows). */
+    NE_RENDER_BACKEND_VULKAN = 1,
 } NERenderBackend;
 
 /**
  * Renderer creation parameters.
  */
 typedef struct NERendererDesc {
-    /** Backend to use. Currently only `NE_RENDER_BACKEND_METAL` is supported. */
+    /** Backend to use. Backend support is platform-dependent. */
     NERenderBackend backend;
 
     /** Enable debug/validation features when available (best-effort). */

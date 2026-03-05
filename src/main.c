@@ -68,16 +68,14 @@ int main(void) {
         return 1;
     }
 
-    const NEWindowDesc desc = {
-        .title = "NanoEngine",
-        .x = 100,
-        .y = 100,
-        .width = 1280,
-        .height = 720,
-        .resizable = true,
-    };
-
-    NEWindow *window = ne_window_create(app, &desc);
+    NEWindow *window = ne_window_create(app,
+                                         &(NEWindowDesc){
+                                         .title = "NanoEngine1",
+                                         .x = 100,
+                                         .y = 100,
+                                         .width = 500,
+                                         .height = 400,
+                                         .resizable = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);
@@ -97,7 +95,11 @@ int main(void) {
     ne_window_show(window);
 
     const NERendererDesc renderer_desc = {
+#if defined(_WIN32)
+        .backend = NE_RENDER_BACKEND_VULKAN,
+#else
         .backend = NE_RENDER_BACKEND_METAL,
+#endif
         .enable_validation = true,
     };
     NERenderer *renderer = ne_renderer_create(app, &renderer_desc);
@@ -123,6 +125,9 @@ int main(void) {
         if (renderer && surface) {
             if (ne_renderer_begin_frame(renderer, surface)) {
                 ne_renderer_end_frame(renderer, surface);
+            } else {
+                /* Avoid burning CPU if the surface isn't ready yet (minimized, etc.). */
+                NE_PLATFORM_YIELD_MS_1();
             }
         } else {
             NE_PLATFORM_YIELD_MS_1();
