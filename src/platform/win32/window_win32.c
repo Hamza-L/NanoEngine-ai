@@ -1,6 +1,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 #include <windowsx.h> /* GET_X_LPARAM / GET_Y_LPARAM */
+#include <dwmapi.h>
 
 #include "ne_app.h"
 #include "ne_log.h"
@@ -32,6 +33,7 @@ struct NEWindow {
     void *user_data;
 
     bool open;
+    bool shown;
     bool destroying;
 
     uint32_t mouse_buttons_down_mask;
@@ -365,7 +367,7 @@ static bool ne_register_window_class(NEApp *app) {
     wc.lpfnWndProc = ne_wndproc;
     wc.hInstance = app->hinstance;
     wc.hCursor = LoadCursorW(NULL, IDC_ARROW);
-    wc.hbrBackground = (HBRUSH)(COLOR_WINDOW + 1);
+    wc.hbrBackground = NULL;
     wc.lpszClassName = class_name;
 
     const ATOM atom = RegisterClassExW(&wc);
@@ -497,10 +499,14 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     window->open = true;
     window->destroying = false;
 
-    const DWORD style_base = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    // const DWORD style_base = WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX;
+    const DWORD style_base = WS_POPUP;
     DWORD style = style_base;
-    if (desc->resizable) {
-        style |= WS_THICKFRAME | WS_MAXIMIZEBOX;
+    if (!desc->undecorated) {
+        style |= WS_CAPTION | WS_OVERLAPPED | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
+        if (desc->resizable) {
+            style |= WS_THICKFRAME;
+        }
     }
 
     // adjusts the size of the window by adding the size of decorators and border so the client area is the actual area given
@@ -523,6 +529,12 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
         NE_LOG_ERROR("CreateWindowExW failed (err=%lu)", (unsigned long)err);
         free(window);
         return NULL;
+    }
+
+    if(desc->undecorated){
+        MARGINS margins = {-1,-1,-1,-1};
+        DwmEnableComposition(DWM_EC_ENABLECOMPOSITION);
+        DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 
     window->hwnd = hwnd;
@@ -556,6 +568,7 @@ void ne_window_show(NEWindow *window) {
     }
     ShowWindow(window->hwnd, SW_SHOW);
     UpdateWindow(window->hwnd);
+    window->shown = true;
 }
 
 void ne_window_hide(NEWindow *window) {
@@ -563,6 +576,7 @@ void ne_window_hide(NEWindow *window) {
         return;
     }
     ShowWindow(window->hwnd, SW_HIDE);
+    window->shown = false;
 }
 
 void ne_window_request_close(NEWindow *window) {

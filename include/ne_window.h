@@ -64,6 +64,9 @@ typedef struct NEWindowDesc {
 
     /** Whether the user can resize the window. */
     bool resizable;
+
+    /** Whether the window has a titlebar and a thickframe. */
+    bool undecorated;
 } NEWindowDesc;
 
 /**

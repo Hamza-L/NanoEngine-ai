@@ -124,9 +124,6 @@ typedef struct NESwapchain {
 } NESwapchain;
 
 struct NERenderer {
-    NERenderBackend backend;
-    bool enable_validation;
-
     HMODULE vulkan_lib;
     VkInstance instance;
 
@@ -316,8 +313,7 @@ static bool ne_vk_load_loader(NERenderer *renderer) {
         return false;
     }
 
-    renderer->fns.vkGetInstanceProcAddr =
-        (PFN_vkGetInstanceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetInstanceProcAddr");
+    renderer->fns.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetInstanceProcAddr");
     renderer->fns.vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetDeviceProcAddr");
 
     if (!renderer->fns.vkGetInstanceProcAddr || !renderer->fns.vkGetDeviceProcAddr) {
@@ -326,10 +322,8 @@ static bool ne_vk_load_loader(NERenderer *renderer) {
     }
 
     renderer->fns.vkCreateInstance = (PFN_vkCreateInstance)ne_vk_get_global(&renderer->fns, "vkCreateInstance");
-    renderer->fns.vkEnumerateInstanceExtensionProperties =
-        (PFN_vkEnumerateInstanceExtensionProperties)ne_vk_get_global(&renderer->fns, "vkEnumerateInstanceExtensionProperties");
-    renderer->fns.vkEnumerateInstanceLayerProperties =
-        (PFN_vkEnumerateInstanceLayerProperties)ne_vk_get_global(&renderer->fns, "vkEnumerateInstanceLayerProperties");
+    renderer->fns.vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)ne_vk_get_global(&renderer->fns, "vkEnumerateInstanceExtensionProperties");
+    renderer->fns.vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)ne_vk_get_global(&renderer->fns, "vkEnumerateInstanceLayerProperties");
 
     if (!renderer->fns.vkCreateInstance || !renderer->fns.vkEnumerateInstanceExtensionProperties) {
         NE_LOG_ERROR("failed to load required Vulkan loader entry points");
@@ -343,25 +337,18 @@ static bool ne_vk_load_instance_fns(NERenderer *r) {
     NEVulkanFunctions *f = &r->fns;
 
     f->vkDestroyInstance = (PFN_vkDestroyInstance)ne_vk_get_instance(f, r->instance, "vkDestroyInstance");
-    f->vkEnumeratePhysicalDevices =
-        (PFN_vkEnumeratePhysicalDevices)ne_vk_get_instance(f, r->instance, "vkEnumeratePhysicalDevices");
-    f->vkGetPhysicalDeviceProperties =
-        (PFN_vkGetPhysicalDeviceProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceProperties");
-    f->vkGetPhysicalDeviceQueueFamilyProperties =
-        (PFN_vkGetPhysicalDeviceQueueFamilyProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+    f->vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)ne_vk_get_instance(f, r->instance, "vkEnumeratePhysicalDevices");
+    f->vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceProperties");
+    f->vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
     f->vkCreateDevice = (PFN_vkCreateDevice)ne_vk_get_instance(f, r->instance, "vkCreateDevice");
 
     f->vkCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)ne_vk_get_instance(f, r->instance, "vkCreateWin32SurfaceKHR");
     f->vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)ne_vk_get_instance(f, r->instance, "vkDestroySurfaceKHR");
 
-    f->vkGetPhysicalDeviceSurfaceSupportKHR =
-        (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
-    f->vkGetPhysicalDeviceSurfaceCapabilitiesKHR =
-        (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
-    f->vkGetPhysicalDeviceSurfaceFormatsKHR =
-        (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
-    f->vkGetPhysicalDeviceSurfacePresentModesKHR =
-        (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    f->vkGetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
+    f->vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    f->vkGetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    f->vkGetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
 
     return f->vkDestroyInstance && f->vkEnumeratePhysicalDevices && f->vkGetPhysicalDeviceQueueFamilyProperties && f->vkCreateDevice &&
            f->vkCreateWin32SurfaceKHR && f->vkDestroySurfaceKHR && f->vkGetPhysicalDeviceSurfaceSupportKHR &&
@@ -860,9 +847,6 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    r->backend = backend;
-    r->enable_validation = desc ? desc->enable_validation : false;
-
     if (!ne_vk_load_loader(r)) {
         ne_renderer_destroy(r);
         return NULL;
@@ -886,7 +870,7 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     const char *layers[4];
     uint32_t layer_count = 0;
 
-    if (r->enable_validation) {
+    if (desc->enable_validation) {
         const char *val_layer = "VK_LAYER_KHRONOS_validation";
         if (ne_vk_has_layer(&r->fns, val_layer)) {
             layers[layer_count++] = val_layer;
@@ -907,7 +891,7 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     app_info.applicationVersion = VK_MAKE_VERSION(0, 0, 1);
     app_info.pEngineName = "NanoEngine";
     app_info.engineVersion = VK_MAKE_VERSION(0, 0, 1);
-    app_info.apiVersion = VK_API_VERSION_1_0;
+    app_info.apiVersion = VK_API_VERSION_1_3;
 
     VkInstanceCreateInfo ici;
     memset(&ici, 0, sizeof(ici));

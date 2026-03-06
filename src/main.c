@@ -36,6 +36,9 @@ static void on_move(NEWindow *window, int32_t x, int32_t y, void *user_data) {
 static void on_key_down(NEWindow *window, NEKeyEvent event, void *user_data) {
     (void)window;
     (void)user_data;
+    if (event.key == NE_KEY_ESCAPE) {
+        ne_window_request_close(window);
+    }
     NE_LOG_DEBUG("key down: key=%u native=%u mods=%u repeat=%d", (unsigned)event.key, (unsigned)event.native_key_code,
                  (unsigned)event.modifiers, event.repeat ? 1 : 0);
 }
@@ -104,14 +107,9 @@ int main(void) {
     };
     NERenderer *renderer = ne_renderer_create(app, &renderer_desc);
 
-    const NERenderSurfaceDesc surface_desc = {
-        .vsync = true,
-        .clear_color_rgba = {0.1f, 0.1f, 0.2f, 1.0f},
-    };
-
     NERenderSurface *surface = NULL;
     if (renderer) {
-        surface = ne_renderer_create_surface(renderer, window, &surface_desc);
+        surface = ne_renderer_create_surface(renderer, window, &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.2f, 1.0f},});
         if (!surface) {
             NE_LOG_ERROR("failed to create render surface (continuing without renderer)");
             ne_renderer_destroy(renderer);
