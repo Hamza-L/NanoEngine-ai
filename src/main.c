@@ -71,14 +71,15 @@ int main(void) {
         return 1;
     }
 
-    NEWindow *window = ne_window_create(app,
-                                         &(NEWindowDesc){
-                                         .title = "NanoEngine1",
-                                         .x = 100,
-                                         .y = 100,
-                                         .width = 500,
-                                         .height = 400,
-                                         .resizable = true});
+    NEWindow *window = ne_window_create(app, &(NEWindowDesc){
+                                                 .title = "NanoEngine1",
+                                                 .x = 100,
+                                                 .y = 100,
+                                                 .width = 500,
+                                                 .height = 400,
+                                                 .resizable = true,
+                                                 // .undecorated = true,
+                                                 .showOnCreate = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);
@@ -95,7 +96,6 @@ int main(void) {
         .on_mouse_down = on_mouse_down,
     };
     ne_window_set_callbacks(window, &callbacks, NULL);
-    ne_window_show(window);
 
     const NERendererDesc renderer_desc = {
 #if defined(_WIN32)

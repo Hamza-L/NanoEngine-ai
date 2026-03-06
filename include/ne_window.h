@@ -67,6 +67,9 @@ typedef struct NEWindowDesc {
 
     /** Whether the window has a titlebar and a thickframe. */
     bool undecorated;
+
+    /** Whether the window has a titlebar and a thickframe. */
+    bool showOnCreate;
 } NEWindowDesc;
 
 /**

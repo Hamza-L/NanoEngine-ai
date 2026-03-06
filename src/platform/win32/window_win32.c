@@ -539,6 +539,10 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     window->hwnd = hwnd;
 
+    if (desc->showOnCreate) {
+        ne_window_show(window);
+    }
+
     app->window_count++;
     return window;
 }
