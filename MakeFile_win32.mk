@@ -10,8 +10,6 @@ mkdir_p = if not exist "$(subst /,\\,$(1))" mkdir "$(subst /,\\,$(1))"
 rmdir_rf = if exist "$(subst /,\\,$(1))" rmdir /s /q "$(subst /,\\,$(1))"
 
 # --- Sources --------------------------------------------------------------
-SRC_C += src/main.c
-SRC_C += src/ne_log.c
 SRC_C += src/platform/win32/window_win32.c
 
 # Vulkan renderer backend (Windows).

@@ -69,7 +69,7 @@ typedef struct NEWindowDesc {
     bool undecorated;
 
     /** Whether the window is shown immediately after creation. */
-    bool showOnCreate;
+    bool show_on_create;
 } NEWindowDesc;
 
 /**
@@ -214,12 +214,15 @@ typedef struct NEMouseButtonEvent {
 
 /**
  * Mouse scroll event.
+ *
+ * Deltas are normalized so that one physical scroll notch ≈ ±1.0.
+ * High-precision trackpads (e.g. macOS) may produce fractional values.
  */
 typedef struct NEMouseScrollEvent {
-    /** Scroll delta in x (units are platform-dependent). */
+    /** Horizontal scroll delta (positive = right). */
     float delta_x;
 
-    /** Scroll delta in y (units are platform-dependent). */
+    /** Vertical scroll delta (positive = up / away from user). */
     float delta_y;
 } NEMouseScrollEvent;
 

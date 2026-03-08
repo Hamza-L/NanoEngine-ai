@@ -79,7 +79,7 @@ int main(void) {
                                                  .height = 400,
                                                  .resizable = true,
                                                  .undecorated = true,
-                                                 .showOnCreate = true});
+                                                 .show_on_create = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);

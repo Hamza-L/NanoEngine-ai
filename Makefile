@@ -21,15 +21,13 @@ OUTPUT := $(BUILD_DIR)/$(APP_NAME)$(EXE_EXT)
 CFLAGS := -std=c2x -O2 -g -Wall -Wextra -Wpedantic -Werror
 OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
-SRC_C :=
+
+# Platform-independent sources (platform makefiles append platform-specific ones).
+SRC_C := src/main.c src/ne_log.c
 SRC_M :=
 
 # Platform makefiles can append to this to force prerequisites before any
 # object is compiled (e.g. downloaded headers).
-EXTRA_OBJECT_DEPS :=
-
-# Optional platform-provided prerequisites that must exist before compiling.
-# (e.g. downloaded headers)
 EXTRA_OBJECT_DEPS :=
 
 # Default platform settings (may be overridden by platform makefiles).
@@ -90,6 +88,3 @@ $(BUILD_DIR)/%.$(OBJ_EXT): %.m $(EXTRA_OBJECT_DEPS)
 
 clean:
 	@$(call rmdir_rf,$(BUILD_DIR))
-
-# Include the .d makefiles. Initially, all the .d files will be missing
--include $(DEPS)

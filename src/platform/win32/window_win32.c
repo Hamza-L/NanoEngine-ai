@@ -335,8 +335,8 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
 
     case WM_MOUSEWHEEL:
         if (window && window->callbacks.on_mouse_scroll) {
-            /* WHEEL_DELTA is 120 units per notch. Keep units platform-dependent for now. */
-            const float dy = (float)GET_WHEEL_DELTA_WPARAM(wparam);
+            /* Normalize: WHEEL_DELTA (120) units per notch → ~1.0 per notch (matches macOS). */
+            const float dy = (float)GET_WHEEL_DELTA_WPARAM(wparam) / (float)WHEEL_DELTA;
             const NEMouseScrollEvent e = {
                 .delta_x = 0.0f,
                 .delta_y = dy,
@@ -539,7 +539,7 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     window->hwnd = hwnd;
 
-    if (desc->showOnCreate) {
+    if (desc->show_on_create) {
         ne_window_show(window);
     }
 
@@ -657,15 +657,37 @@ bool ne_window_get_content_size(const NEWindow *window, int32_t *out_width, int3
 }
 
 bool ne_window_get_framebuffer_size(const NEWindow *window, int32_t *out_width, int32_t *out_height) {
-    /* DPI handling is deferred; treat framebuffer==content for now. */
-    return ne_window_get_content_size(window, out_width, out_height);
+    if (!window || !window->open || !window->hwnd) {
+        return false;
+    }
+
+    int32_t cw = 0;
+    int32_t ch = 0;
+    if (!ne_window_get_content_size(window, &cw, &ch)) {
+        return false;
+    }
+
+    // TODO(Hamza): test this
+    const UINT dpi = GetDpiForWindow(window->hwnd);
+    const float scale = (float)dpi / 96.0f;
+
+    if (out_width) {
+        *out_width = (int32_t)(cw * scale + 0.5f);
+    }
+    if (out_height) {
+        *out_height = (int32_t)(ch * scale + 0.5f);
+    }
+
+    return true;
 }
 
 bool ne_window_get_content_scale(const NEWindow *window, float *out_scale) {
-    if (!window || !window->open || !out_scale) {
+    if (!window || !window->open || !window->hwnd || !out_scale) {
         return false;
     }
-    *out_scale = 1.0f;
+
+    const UINT dpi = GetDpiForWindow(window->hwnd);
+    *out_scale = (float)dpi / 96.0f;
     return true;
 }
 

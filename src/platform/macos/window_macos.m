@@ -593,7 +593,7 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     app->window_count++;
 
-    if (desc->showOnCreate) {
+    if (desc->show_on_create) {
         [ns_window makeKeyAndOrderFront:nil];
     }
 
