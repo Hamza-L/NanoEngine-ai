@@ -78,7 +78,7 @@ int main(void) {
                                                  .width = 500,
                                                  .height = 400,
                                                  .resizable = true,
-                                                 .undecorated = true,
+                                                 // .undecorated = true,
                                                  .show_on_create = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
@@ -112,8 +112,10 @@ int main(void) {
 
     while (ne_window_is_open(window) && ne_app_poll_events(app)) {
         if (renderer && surface) {
-            if (ne_renderer_begin_frame(renderer, surface)) {
-                ne_renderer_end_frame(renderer, surface);
+            NERenderPass *pass = ne_renderer_begin_frame(renderer, surface);
+            if (pass) {
+                /* Record draw / compute commands here. */
+                ne_renderer_end_frame(renderer, pass);
             } else {
                 /* Avoid burning CPU if the surface isn't ready yet (minimized, etc.). */
                 NE_PLATFORM_YIELD_MS_1();

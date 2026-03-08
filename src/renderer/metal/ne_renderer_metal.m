@@ -28,6 +28,18 @@ struct NERenderSurface {
     float clear_color[4];
 };
 
+/**
+ * NERenderPass is currently backed by the surface itself.
+ * This may become a separate allocation when multiple render passes per frame
+ * are supported.
+ */
+struct NERenderPass {
+    NERenderSurface *surface;
+};
+
+/* Per-frame render pass instance (valid between begin_frame / end_frame). */
+static NERenderPass g_active_pass = {0};
+
 static NERenderer *g_renderer_singleton = NULL;
 
 static const void *g_surface_assoc_key = &g_surface_assoc_key;
@@ -234,49 +246,49 @@ void ne_renderer_surface_set_clear_color(NERenderSurface *surface, float r, floa
     surface->clear_color[3] = a;
 }
 
-bool ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *surface) {
+NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *surface) {
     if (!renderer || !surface || surface->renderer != renderer) {
-        return false;
+        return NULL;
     }
 
     if (!surface->window || !ne_window_is_open(surface->window)) {
-        return false;
+        return NULL;
     }
 
     if (surface->drawable || surface->command_buffer) {
         NE_LOG_WARN("begin_frame called while a frame is already in progress");
-        return false;
+        return NULL;
     }
 
     CAMetalLayer *layer = ne_surface_get_layer(surface);
     if (!layer) {
-        return false;
+        return NULL;
     }
 
     int32_t fb_w = 0;
     int32_t fb_h = 0;
     if (!ne_window_get_framebuffer_size(surface->window, &fb_w, &fb_h)) {
-        return false;
+        return NULL;
     }
     if (fb_w <= 0 || fb_h <= 0) {
-        return false;
+        return NULL;
     }
 
     layer.drawableSize = CGSizeMake((CGFloat)fb_w, (CGFloat)fb_h);
 
     id<CAMetalDrawable> drawable = [layer nextDrawable];
     if (!drawable) {
-        return false;
+        return NULL;
     }
 
     id<MTLCommandQueue> queue = ne_renderer_get_queue(renderer);
     if (!queue) {
-        return false;
+        return NULL;
     }
 
     id<MTLCommandBuffer> command_buffer = [queue commandBuffer];
     if (!command_buffer) {
-        return false;
+        return NULL;
     }
 
     MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -292,11 +304,17 @@ bool ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *surface) {
     surface->drawable = (__bridge_retained void *)drawable;
     surface->command_buffer = (__bridge_retained void *)command_buffer;
 
-    return true;
+    g_active_pass.surface = surface;
+    return &g_active_pass;
 }
 
-void ne_renderer_end_frame(NERenderer *renderer, NERenderSurface *surface) {
-    if (!renderer || !surface || surface->renderer != renderer) {
+void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
+    if (!renderer || !pass || !pass->surface) {
+        return;
+    }
+
+    NERenderSurface *surface = pass->surface;
+    if (surface->renderer != renderer) {
         return;
     }
 
@@ -314,4 +332,6 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderSurface *surface) {
 
     (void)CFBridgingRelease(surface->drawable);
     surface->drawable = NULL;
+
+    pass->surface = NULL;
 }

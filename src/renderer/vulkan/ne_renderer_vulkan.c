@@ -151,6 +151,18 @@ struct NERenderSurface {
     struct NERenderSurface *next;
 };
 
+/**
+ * NERenderPass is currently backed by the surface itself.
+ * This may become a separate allocation when multiple render passes per frame
+ * are supported.
+ */
+struct NERenderPass {
+    NERenderSurface *surface;
+};
+
+/* Per-frame render pass instance (valid between begin_frame / end_frame). */
+static NERenderPass g_active_pass = {0};
+
 static NERenderer *g_renderer_singleton = NULL;
 
 static void *ne_vk_get_global(const NEVulkanFunctions *fns, const char *name) {
@@ -1069,20 +1081,20 @@ void ne_renderer_surface_set_clear_color(NERenderSurface *surface, float r, floa
     surface->clear_color[3] = a;
 }
 
-bool ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
+NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     if (!r || !surface || surface->renderer != r) {
-        return false;
+        return NULL;
     }
 
     if (!surface->window || !ne_window_is_open(surface->window)) {
-        return false;
+        return NULL;
     }
 
     const bool vsync = true; /* surface desc vsync is not stored yet; treat as true for now. */
 
     if (surface->wants_swapchain_recreate || surface->sc.swapchain == VK_NULL_HANDLE) {
         if (!ne_vk_sc_create(surface, vsync)) {
-            return false;
+            return NULL;
         }
     }
 
@@ -1090,7 +1102,7 @@ bool ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     const VkResult vr_wait = r->fns.vkWaitForFences(r->device, 1, &surface->sc.fences_in_flight[frame], VK_TRUE, UINT64_MAX);
     if (vr_wait != VK_SUCCESS) {
-        return false;
+        return NULL;
     }
 
     uint32_t image_index = 0;
@@ -1099,16 +1111,16 @@ bool ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
         surface->wants_swapchain_recreate = true;
-        return false;
+        return NULL;
     }
 
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkAcquireNextImageKHR failed (vr=%d)", (int)vr);
-        return false;
+        return NULL;
     }
 
     if (image_index >= surface->sc.image_count) {
-        return false;
+        return NULL;
     }
 
     /*
@@ -1141,7 +1153,7 @@ bool ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     vr = r->fns.vkBeginCommandBuffer(cmd, &bi);
     if (vr != VK_SUCCESS) {
-        return false;
+        return NULL;
     }
 
     VkImage img = surface->sc.images[image_index];
@@ -1165,16 +1177,22 @@ bool ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     vr = r->fns.vkEndCommandBuffer(cmd);
     if (vr != VK_SUCCESS) {
-        return false;
+        return NULL;
     }
 
     surface->sc.image_layouts[image_index] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    return true;
+    g_active_pass.surface = surface;
+    return &g_active_pass;
 }
 
-void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
-    if (!r || !surface || surface->renderer != r) {
+void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
+    if (!r || !pass || !pass->surface) {
+        return;
+    }
+
+    NERenderSurface *surface = pass->surface;
+    if (surface->renderer != r) {
         return;
     }
 
@@ -1230,4 +1248,6 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
     }
 
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
+
+    pass->surface = NULL;
 }

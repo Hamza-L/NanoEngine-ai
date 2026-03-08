@@ -20,6 +20,9 @@ typedef struct NERenderer NERenderer;
 /** Opaque handle to a window presentation surface. */
 typedef struct NERenderSurface NERenderSurface;
 
+/** Opaque handle to a render pass (active frame command recording context). */
+typedef struct NERenderPass NERenderPass;
+
 /**
  * Renderer creation parameters.
  */
@@ -103,30 +106,32 @@ void ne_renderer_surface_set_clear_color(NERenderSurface *surface, float r, floa
 /**
  * Begin rendering a frame for a given surface.
  *
+ * Acquires a drawable/backbuffer and returns a render pass handle that can
+ * be used to record draw and compute commands (see `ne_renderer_pass.h`).
+ *
  * The backend uses pull-based resizing: it queries the window framebuffer size
- * during `ne_renderer_begin_frame` and updates presentation resources as
- * needed.
+ * during this call and updates presentation resources as needed.
  *
  * Parameters:
  * - `renderer`: Renderer instance.
  * - `surface`: Surface instance.
  *
  * Returns:
- * - `true` if a drawable/backbuffer was acquired and rendering can proceed.
- * - `false` if the surface/window is not ready (e.g., minimized, closed).
+ * - A valid `NERenderPass*` on success.
+ * - NULL if the surface/window is not ready (e.g., minimized, closed).
  */
-bool ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *surface);
+NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *surface);
 
 /**
- * End rendering a frame for a given surface.
+ * End rendering a frame and present.
  *
- * This typically presents the rendered image.
+ * After this call, the `NERenderPass*` is invalid and must not be used.
  *
  * Parameters:
  * - `renderer`: Renderer instance.
- * - `surface`: Surface instance.
+ * - `pass`: Render pass returned by `ne_renderer_begin_frame`.
  */
-void ne_renderer_end_frame(NERenderer *renderer, NERenderSurface *surface);
+void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass);
 
 #ifdef __cplusplus
 }
