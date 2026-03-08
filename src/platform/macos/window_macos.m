@@ -259,6 +259,21 @@ static void ne_emit_mouse_button(NEWindow *window, NSEvent *event, bool is_down,
     callback(window, e, window->user_data);
 }
 
+/**
+ * Custom NSWindow subclass that allows borderless windows to become key.
+ *
+ * By default, an NSWindow with NSWindowStyleMaskBorderless returns NO from
+ * -canBecomeKeyWindow, which prevents it from receiving keyboard events.
+ */
+@interface NEMacWindow : NSWindow
+@end
+
+@implementation NEMacWindow
+- (BOOL)canBecomeKeyWindow {
+    return YES;
+}
+@end
+
 @interface NEMacWindowDelegate : NSObject <NSWindowDelegate>
 @property(nonatomic, assign) NEWindow *owner;
 @end
@@ -537,13 +552,18 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     window->app = app;
 
-    NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
-    if (desc->resizable) {
-        style |= NSWindowStyleMaskResizable;
+    NSUInteger style;
+    if (desc->undecorated) {
+        style = NSWindowStyleMaskBorderless;
+    } else {
+        style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable | NSWindowStyleMaskMiniaturizable;
+        if (desc->resizable) {
+            style |= NSWindowStyleMaskResizable;
+        }
     }
 
     NSRect frame = NSMakeRect((CGFloat)desc->x, (CGFloat)desc->y, (CGFloat)desc->width, (CGFloat)desc->height);
-    NSWindow *ns_window = [[NSWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
+    NSWindow *ns_window = [[NEMacWindow alloc] initWithContentRect:frame styleMask:style backing:NSBackingStoreBuffered defer:NO];
     if (!ns_window) {
         free(window);
         return NULL;
@@ -572,6 +592,11 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     window->destroying = false;
 
     app->window_count++;
+
+    if (desc->showOnCreate) {
+        [ns_window makeKeyAndOrderFront:nil];
+    }
+
     return window;
 }
 
@@ -650,7 +675,13 @@ void ne_window_request_close(NEWindow *window) {
         return;
     }
     NSWindow *ns_window = (__bridge NSWindow *)window->ns_window;
-    [ns_window performClose:nil];
+    /*
+     * -performClose: simulates a click on the close button. Borderless windows
+     * have no close button (no NSWindowStyleMaskClosable), so -performClose:
+     * silently does nothing. Use -close directly, which still fires the
+     * windowWillClose: delegate notification.
+     */
+    [ns_window close];
 }
 
 void ne_window_set_title(NEWindow *window, const char *title) {
@@ -676,9 +707,11 @@ void ne_window_set_size(NEWindow *window, int32_t width, int32_t height) {
         return;
     }
     NSWindow *ns_window = (__bridge NSWindow *)window->ns_window;
-    NSRect frame = [ns_window frame];
-    frame.size = NSMakeSize((CGFloat)width, (CGFloat)height);
-    [ns_window setFrame:frame display:YES];
+    /* Set the content (client) area size; the frame adjusts to fit decorations. */
+    NSRect content_rect = [ns_window contentRectForFrameRect:[ns_window frame]];
+    content_rect.size = NSMakeSize((CGFloat)width, (CGFloat)height);
+    NSRect new_frame = [ns_window frameRectForContentRect:content_rect];
+    [ns_window setFrame:new_frame display:YES];
 }
 
 void ne_window_set_callbacks(NEWindow *window, const NEWindowCallbacks *callbacks, void *user_data) {

@@ -836,12 +836,6 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    const NERenderBackend backend = desc ? desc->backend : NE_RENDER_BACKEND_VULKAN;
-    if (backend != NE_RENDER_BACKEND_VULKAN) {
-        NE_LOG_ERROR("unsupported renderer backend on Win32 build: %d", (int)backend);
-        return NULL;
-    }
-
     NERenderer *r = (NERenderer *)calloc(1, sizeof(NERenderer));
     if (!r) {
         return NULL;
@@ -870,7 +864,7 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     const char *layers[4];
     uint32_t layer_count = 0;
 
-    if (desc->enable_validation) {
+    if (!desc || desc->enable_validation) {
         const char *val_layer = "VK_LAYER_KHRONOS_validation";
         if (ne_vk_has_layer(&r->fns, val_layer)) {
             layers[layer_count++] = val_layer;

@@ -78,7 +78,7 @@ int main(void) {
                                                  .width = 500,
                                                  .height = 400,
                                                  .resizable = true,
-                                                 // .undecorated = true,
+                                                 .undecorated = true,
                                                  .showOnCreate = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
@@ -97,16 +97,7 @@ int main(void) {
     };
     ne_window_set_callbacks(window, &callbacks, NULL);
 
-    const NERendererDesc renderer_desc = {
-#if defined(_WIN32)
-        .backend = NE_RENDER_BACKEND_VULKAN,
-#else
-        .backend = NE_RENDER_BACKEND_METAL,
-#endif
-        .enable_validation = true,
-    };
-    NERenderer *renderer = ne_renderer_create(app, &renderer_desc);
-
+    NERenderer *renderer = ne_renderer_create(app, &(NERendererDesc){.enable_validation = true});
     NERenderSurface *surface = NULL;
     if (renderer) {
         surface = ne_renderer_create_surface(renderer, window, &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.2f, 1.0f},});

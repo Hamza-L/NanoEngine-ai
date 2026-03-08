@@ -21,25 +21,9 @@ typedef struct NERenderer NERenderer;
 typedef struct NERenderSurface NERenderSurface;
 
 /**
- * Rendering backend.
- *
- * The public API is designed to be extensible to additional backends.
- */
-typedef enum NERenderBackend {
-    /** Apple Metal backend (macOS). */
-    NE_RENDER_BACKEND_METAL = 0,
-
-    /** Vulkan backend (Windows). */
-    NE_RENDER_BACKEND_VULKAN = 1,
-} NERenderBackend;
-
-/**
  * Renderer creation parameters.
  */
 typedef struct NERendererDesc {
-    /** Backend to use. Backend support is platform-dependent. */
-    NERenderBackend backend;
-
     /** Enable debug/validation features when available (best-effort). */
     bool enable_validation;
 } NERendererDesc;

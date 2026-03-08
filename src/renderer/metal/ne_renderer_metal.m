@@ -15,7 +15,6 @@
 struct NERenderer {
     void *device;
     void *queue;
-    NERenderBackend backend;
 };
 
 struct NERenderSurface {
@@ -61,11 +60,13 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    const NERenderBackend backend = desc ? desc->backend : NE_RENDER_BACKEND_METAL;
-    if (backend != NE_RENDER_BACKEND_METAL) {
-        NE_LOG_ERROR("unsupported renderer backend: %d", (int)backend);
-        return NULL;
-    }
+    /*
+     * enable_validation is a no-op for the Metal backend.
+     * Metal's GPU validation is controlled via Xcode scheme settings or the
+     * MTL_DEBUG_LAYER / MTL_SHADER_VALIDATION environment variables, not
+     * programmatically at device creation time.
+     */
+    (void)desc;
 
     id<MTLDevice> device = MTLCreateSystemDefaultDevice();
     if (!device) {
@@ -84,11 +85,8 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    renderer->backend = backend;
     renderer->device = (__bridge_retained void *)device;
     renderer->queue = (__bridge_retained void *)queue;
-
-    (void)desc;
 
     g_renderer_singleton = renderer;
     return renderer;
