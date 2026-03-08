@@ -273,7 +273,7 @@ Initializes the GPU device and manages render surfaces (swapchains) and frame li
 
 | Type | Description |
 |---|---|
-| `NERenderer` | Opaque renderer handle (one per process) |
+| `NERenderer` | Opaque renderer handle. Multiple instances are allowed but heavyweight (each allocates its own GPU device). |
 | `NERenderSurface` | Opaque surface handle, tied to a window |
 | `NERenderPass` | Opaque render pass handle, returned by `begin_frame` |
 | `NERendererDesc` | Renderer creation descriptor |
@@ -297,7 +297,7 @@ Initializes the GPU device and manages render surfaces (swapchains) and frame li
 #### `NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc)`
 Creates the renderer. On Vulkan: loads `vulkan-1.dll`, creates `VkInstance`, picks a physical device, creates `VkDevice`. On Metal: creates `MTLDevice` and `MTLCommandQueue`. Returns `NULL` on failure.
 
-Only one renderer may exist at a time (singleton).
+Multiple renderer instances are allowed but each allocates its own GPU device and queues, making this a heavyweight operation. Most applications need only one.
 
 #### `void ne_renderer_destroy(NERenderer *renderer)`
 Destroys the renderer and all associated GPU state.

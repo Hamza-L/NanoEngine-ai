@@ -29,19 +29,18 @@ struct NERenderSurface {
 };
 
 /**
- * NERenderPass is currently backed by the surface itself.
- * This may become a separate allocation when multiple render passes per frame
- * are supported.
+ * NERenderPass is a lightweight token pointing back to the owning surface.
+ * A single static instance is reused each frame to avoid per-frame heap
+ * allocation.  Only one frame may be in-flight at a time — begin_frame will
+ * reject a second call until end_frame clears the active pass.
  */
 struct NERenderPass {
     NERenderSurface *surface;
 };
 
-/* Per-frame render pass instance (valid between begin_frame / end_frame). */
 static NERenderPass g_active_pass = {0};
 
-static NERenderer *g_renderer_singleton = NULL;
-
+/* Association key used to enforce one render surface per window. */
 static const void *g_surface_assoc_key = &g_surface_assoc_key;
 
 static CAMetalLayer *ne_surface_get_layer(const NERenderSurface *surface) {
@@ -66,11 +65,6 @@ static id<MTLCommandQueue> ne_renderer_get_queue(const NERenderer *renderer) {
 
 NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     (void)app;
-
-    if (g_renderer_singleton) {
-        NE_LOG_ERROR("renderer already created (only one renderer is supported)");
-        return NULL;
-    }
 
     /*
      * enable_validation is a no-op for the Metal backend.
@@ -100,17 +94,12 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     renderer->device = (__bridge_retained void *)device;
     renderer->queue = (__bridge_retained void *)queue;
 
-    g_renderer_singleton = renderer;
     return renderer;
 }
 
 void ne_renderer_destroy(NERenderer *renderer) {
     if (!renderer) {
         return;
-    }
-
-    if (renderer != g_renderer_singleton) {
-        NE_LOG_WARN("attempted to destroy non-singleton renderer");
     }
 
     if (renderer->queue) {
@@ -121,10 +110,6 @@ void ne_renderer_destroy(NERenderer *renderer) {
     if (renderer->device) {
         (void)CFBridgingRelease(renderer->device);
         renderer->device = NULL;
-    }
-
-    if (renderer == g_renderer_singleton) {
-        g_renderer_singleton = NULL;
     }
 
     free(renderer);
@@ -144,7 +129,7 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *renderer, NEWindow *wind
         return NULL;
     }
 
-    /* Enforce one surface per window by associating a marker with the view. */
+    /* Enforce one surface per window: a view has exactly one backing CAMetalLayer. */
     if (objc_getAssociatedObject(view, g_surface_assoc_key) != nil) {
         NE_LOG_ERROR("window already has a render surface");
         return NULL;
@@ -255,8 +240,13 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
         return NULL;
     }
 
+    if (g_active_pass.surface) {
+        NE_LOG_WARN("begin_frame called while a frame is already in progress — call ne_renderer_end_frame first");
+        return NULL;
+    }
+
     if (surface->drawable || surface->command_buffer) {
-        NE_LOG_WARN("begin_frame called while a frame is already in progress");
+        NE_LOG_WARN("begin_frame called with dangling frame state on surface");
         return NULL;
     }
 
