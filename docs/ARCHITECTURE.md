@@ -88,6 +88,9 @@ NanoEngine2/
 │       │   └── ne_renderer_metal.m  Metal backend
 │       └── vulkan/
 │           └── ne_renderer_vulkan.c Vulkan backend
+├── shaders/                    Shader source & bytecode
+│   ├── metal/                      MSL source files (.metal)
+│   └── spirv/                      Pre-compiled SPIR-V bytecode (.spv)
 ├── Makefile                    Top-level build (platform-dispatching)
 ├── MakeFile_macos.mk           macOS sources + frameworks
 ├── MakeFile_win32.mk           Win32 sources + Vulkan header download
@@ -195,11 +198,11 @@ GPU resources (buffers, shaders, pipelines) are managed via **handle-based pools
 | Renderer init | `ne_renderer.h` | ✅ | ✅ |
 | Render surface | `ne_renderer.h` | ✅ | ✅ |
 | Clear screen | `ne_renderer.h` | ✅ | ✅ |
-| GPU Buffers | `ne_renderer_buffer.h` | ❌ | ❌ |
-| Shaders | `ne_renderer_shader.h` | ❌ | ❌ |
-| Graphics pipelines | `ne_renderer_pipeline.h` | ❌ | ❌ |
+| GPU Buffers | `ne_renderer_buffer.h` | ❌ | ✅ |
+| Shaders | `ne_renderer_shader.h` | ❌ | ✅ |
+| Graphics pipelines | `ne_renderer_pipeline.h` | ❌ | ✅ |
 | Compute pipelines | `ne_renderer_pipeline.h` | ❌ | ❌ |
-| Render pass commands | `ne_renderer_pass.h` | ❌ | ❌ |
+| Render pass commands | `ne_renderer_pass.h` | ❌ | ✅ |
 | Compute pass commands | `ne_renderer_pass.h` | ❌ | ❌ |
 
 ---

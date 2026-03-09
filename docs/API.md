@@ -1,6 +1,8 @@
 # NanoEngine2 — API Reference
 
-> Functions marked with ⚠️ are declared in headers but **not yet implemented** in any backend.
+> Functions marked with ⚠️ are declared in headers but **not yet implemented** in one or both backends.
+> The Metal (macOS) backend is feature-complete for graphics operations.
+> The Vulkan (Win32) backend currently supports app lifecycle, windowing, and clear-screen only.
 
 ---
 
@@ -343,9 +345,9 @@ Ends the frame. Submits recorded commands, presents the swapchain image.
 <a id="buffers"></a>
 ## Buffers — `ne_renderer_buffer.h`
 
-> ⚠️ **Not yet implemented** in any backend.
-
 GPU buffer management for vertex, index, uniform, and storage data.
+
+> ✅ **Metal backend:** Fully implemented. ⚠️ **Vulkan backend:** Not yet implemented.
 
 ### Types
 
@@ -390,13 +392,13 @@ Flags may be combined: `NE_BUFFER_USAGE_VERTEX | NE_BUFFER_USAGE_STORAGE`.
 
 ### Functions
 
-#### ⚠️ `NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc)`
+#### `NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc)`
 Creates a GPU buffer. If `initial_data` is non-NULL, the data is uploaded immediately. Returns `NE_BUFFER_HANDLE_NULL` on failure.
 
-#### ⚠️ `void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle, const void *data, uint32_t size, uint32_t offset)`
+#### `void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle, const void *data, uint32_t size, uint32_t offset)`
 Updates a portion of the buffer's contents. `offset` + `size` must not exceed the buffer's total size.
 
-#### ⚠️ `void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle)`
+#### `void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle)`
 Destroys the buffer and frees GPU memory.
 
 ### Utility
@@ -409,9 +411,9 @@ Returns `true` if the handle is not null (`id != 0`). Inline function.
 <a id="shaders"></a>
 ## Shaders — `ne_renderer_shader.h`
 
-> ⚠️ **Not yet implemented** in any backend.
-
 Shader module creation from pre-compiled bytecode or source.
+
+> ✅ **Metal backend:** Fully implemented (bytecode + runtime MSL compilation). ⚠️ **Vulkan backend:** Not yet implemented.
 
 ### Types
 
@@ -456,16 +458,20 @@ Shader module creation from pre-compiled bytecode or source.
 
 ### Functions
 
-#### ⚠️ `NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc)`
-Creates a shader module from pre-compiled bytecode (SPIR-V or metallib). Returns `NE_SHADER_HANDLE_NULL` on failure.
+#### `NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc)`
+Creates a shader module from pre-compiled bytecode (SPIR-V on Vulkan, metallib on Metal). Returns `NE_SHADER_HANDLE_NULL` on failure.
 
-#### ⚠️ `NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc)`
-Creates a shader module by compiling source at runtime via Slang. Returns `NE_SHADER_HANDLE_NULL` on failure.
+> ⚠️ **Vulkan backend:** Not yet implemented.
 
-> **Note:** Runtime compilation requires the Slang compiler library. This path is planned but not yet available. Initial implementation will return a null handle.
+#### `NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc)`
+Creates a shader module by compiling source at runtime. On Metal, the source is expected to be MSL (Metal Shading Language). Returns `NE_SHADER_HANDLE_NULL` on failure.
 
-#### ⚠️ `void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle)`
-Destroys the shader module.
+> ⚠️ **Vulkan backend:** Not yet implemented. A future Slang integration path would transpile Slang → MSL / SPIR-V.
+
+#### `void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle)`
+Destroys the shader module and frees GPU resources.
+
+> ⚠️ **Vulkan backend:** Not yet implemented.
 
 ### Utility
 
@@ -477,9 +483,9 @@ Returns `true` if the handle is not null (`id != 0`). Inline function.
 <a id="pipelines"></a>
 ## Pipelines — `ne_renderer_pipeline.h`
 
-> ⚠️ **Not yet implemented** in any backend.
-
 Graphics and compute pipeline state objects.
+
+> ✅ **Metal backend:** Graphics pipelines implemented. ⚠️ **Vulkan backend:** Not yet implemented. ⚠️ Compute pipelines not yet implemented on either backend.
 
 ### Types
 
@@ -576,10 +582,10 @@ Graphics and compute pipeline state objects.
 
 ### Functions
 
-#### ⚠️ `NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *desc)`
+#### `NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *desc)`
 Creates a graphics pipeline. Compiles vertex layout, shaders, topology, and blend state into a GPU pipeline object. Returns `NE_PIPELINE_HANDLE_NULL` on failure.
 
-#### ⚠️ `void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle)`
+#### `void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle)`
 Destroys the graphics pipeline.
 
 #### ⚠️ `NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer, const NEComputePipelineDesc *desc)`
@@ -601,9 +607,9 @@ Returns `true` if the handle is not null. Inline function.
 <a id="render--compute-passes"></a>
 ## Render & Compute Passes — `ne_renderer_pass.h`
 
-> ⚠️ **Not yet implemented** in any backend.
-
 Command recording within a frame. A `NERenderPass` is obtained from `ne_renderer_begin_frame()` and used to record graphics and compute commands.
+
+> ✅ **Metal backend:** All graphics commands implemented. ⚠️ **Vulkan backend:** Not yet implemented. ⚠️ Compute pass commands not yet implemented on either backend.
 
 ### Types
 
@@ -614,22 +620,22 @@ Command recording within a frame. A `NERenderPass` is obtained from `ne_renderer
 
 ### Graphics Commands
 
-#### ⚠️ `void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline)`
+#### `void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline)`
 Binds a graphics pipeline for subsequent draw calls.
 
-#### ⚠️ `void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot, NEBufferHandle buffer)`
+#### `void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot, NEBufferHandle buffer)`
 Binds a vertex buffer to the given slot. Slot indices correspond to `vertex_layouts` in the pipeline descriptor.
 
-#### ⚠️ `void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer, NEIndexType type)`
+#### `void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer, NEIndexType type)`
 Binds an index buffer for indexed draw calls.
 
-#### ⚠️ `void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, uint32_t slot, const void *data, uint32_t size)`
+#### `void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, uint32_t slot, const void *data, uint32_t size)`
 Sets uniform / push constant data for the given shader stage and slot. On Vulkan, uses push constants. On Metal, uses `setVertexBytes` / `setFragmentBytes`.
 
-#### ⚠️ `void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex, uint32_t vertex_count)`
+#### `void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex, uint32_t vertex_count)`
 Draws non-indexed primitives.
 
-#### ⚠️ `void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count, uint32_t first_index, int32_t vertex_offset)`
+#### `void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count, uint32_t first_index, int32_t vertex_offset)`
 Draws indexed primitives.
 
 ### Compute Pass Lifecycle
