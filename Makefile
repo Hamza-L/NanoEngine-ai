@@ -39,7 +39,7 @@ SRC_M :=
 
 # Test sources (only compiled when TESTING_ENABLED=1)
 ifeq ($(TESTING_ENABLED),1)
-SRC_C += src/test_buffer.c
+SRC_C += src/test/test_buffer.c
 endif
 
 # Platform makefiles can append to this to force prerequisites before any

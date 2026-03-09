@@ -1,3 +1,5 @@
+#if TESTING_ENABLED
+
 #ifndef NE_TEST_BUFFER_H
 #define NE_TEST_BUFFER_H
 
@@ -6,7 +8,6 @@
 typedef struct NEApp NEApp;
 typedef struct NEWindow NEWindow;
 
-#if TESTING_ENABLED
 
 /**
  * Run the GPU buffer test suite.
@@ -27,6 +28,6 @@ typedef struct NEWindow NEWindow;
  */
 bool test_buffer(NEApp *app, NEWindow *window);
 
-#endif /* TESTING_ENABLED */
-
 #endif /* NE_TEST_BUFFER_H */
+
+#endif /* TESTING_ENABLED */

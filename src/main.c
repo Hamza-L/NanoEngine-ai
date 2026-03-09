@@ -1,7 +1,7 @@
 #include "ne_app.h"
 #include "ne_log.h"
 #include "ne_renderer.h"
-#include "ne_test_buffer.h"
+#include "test/ne_test.h"
 #include "ne_window.h"
 
 #include <stdbool.h>
@@ -30,6 +30,8 @@ static void on_key_down(NEWindow *window, NEKeyEvent event, void *user_data) {
 /* ── Main ───────────────────────────────────────────────────────────────── */
 
 int main(void) {
+    TEST_ALL_IF_TESTING_ENABLED();
+
     ne_logger_set_level(ne_log_get_default_logger(), NE_LOG_LEVEL_TRACE);
 
     /* ── App + window ──────────────────────────────────────────────────── */
@@ -65,21 +67,8 @@ int main(void) {
     };
     ne_window_set_callbacks(window, &callbacks, NULL);
 
-#if TESTING_ENABLED
-    /* ── Run Tests ─────────────────────────────────────────────────────── */
 
-    bool test_passed = test_buffer(app, window);
-
-    /* ── Cleanup ───────────────────────────────────────────────────────── */
-
-    ne_window_destroy(window);
-    ne_app_destroy(app);
-
-    NE_LOG_INFO("application shutdown complete");
-    return test_passed ? 0 : 1;
-
-#else /* !TESTING_ENABLED */
-    /* ── Main Loop (placeholder) ───────────────────────────────────────── */
+    /* ── Main Loop ______________───────────────────────────────────────── */
 
     NE_LOG_INFO("NanoEngine2 running in normal mode (no tests enabled)");
     NE_LOG_INFO("press Escape to quit");
@@ -96,5 +85,4 @@ int main(void) {
     NE_LOG_INFO("application shutdown complete");
     return 0;
 
-#endif /* TESTING_ENABLED */
 }
