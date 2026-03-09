@@ -32,22 +32,48 @@ typedef enum NEShaderStage {
 } NEShaderStage;
 
 /* ======================================================================== */
+/* Shader compilation optimization level                                    */
+/* ======================================================================== */
+
+/**
+ * Controls the optimization level applied by ne_shader_create_from_source().
+ *
+ * Set once per renderer via ne_renderer_set_shader_optimization().
+ * Defaults to NE_SHADER_OPTIMIZATION_NONE if the function is never called,
+ * which prioritises fast compile times and accurate error reporting.
+ *
+ * Backend mapping:
+ *   Vulkan (shaderc) :  NONE        → -O0 (no optimisation)
+ *                       SIZE        → -Os (optimise for binary size)
+ *                       PERFORMANCE → -O  (optimise for GPU throughput)
+ *   Metal            :  NONE / SIZE → fastMathEnabled = NO
+ *                       PERFORMANCE → fastMathEnabled = YES
+ */
+typedef enum NEShaderOptimization {
+    NE_SHADER_OPTIMIZATION_NONE        = 0, /* fastest compile, best error messages */
+    NE_SHADER_OPTIMIZATION_SIZE        = 1, /* optimise for binary size             */
+    NE_SHADER_OPTIMIZATION_PERFORMANCE = 2, /* optimise for GPU throughput          */
+} NEShaderOptimization;
+
+/* ======================================================================== */
 /* Descriptors                                                              */
 /* ======================================================================== */
 
 /**
- * Create a shader from pre-compiled / pre-transpiled bytecode.
+ * Create a shader from pre-compiled bytecode.
  *
  * The bytecode format is backend-specific:
- * - Vulkan : SPIR-V binary.
- * - Metal  : Precompiled metallib binary.
+ *   Vulkan : SPIR-V binary.
+ *   Metal  : Precompiled metallib binary.
  *
- * This path has no external dependencies and is intended for release builds.
+ * This path has no external runtime dependencies and is intended for
+ * release / production builds.
  */
 typedef struct NEShaderDesc {
     NEShaderStage stage;
 
-    /** Pointer to the bytecode blob.  Copied internally. */
+    /** Pointer to the bytecode blob. Copied internally by vkCreateShaderModule /
+     *  newLibraryWithData, so the caller may free it after this call returns. */
     const void *bytecode;
 
     /** Size of the bytecode blob in bytes. */
@@ -60,18 +86,20 @@ typedef struct NEShaderDesc {
 /**
  * Create a shader by compiling source code at runtime.
  *
- * The engine uses the Slang compiler (loaded dynamically) to transpile
- * the source to the appropriate backend target:
- * - Vulkan : Slang -> SPIR-V.
- * - Metal  : Slang -> MSL source -> Metal runtime compilation.
+ * Source language is backend-specific:
+ *   Vulkan : GLSL, compiled to SPIR-V via shaderc (loaded dynamically).
+ *   Metal  : MSL, compiled at runtime by the Metal framework.
  *
- * If the Slang library is not available, this function returns a null handle.
- * This path is intended for development / rapid iteration.
+ * The optimization level applied during compilation is controlled globally
+ * via ne_renderer_set_shader_optimization() (default: NONE).
+ *
+ * This path is intended for development and hot-reload workflows.
+ * For release builds prefer ne_shader_create() with pre-compiled bytecode.
  */
 typedef struct NEShaderSourceDesc {
     NEShaderStage stage;
 
-    /** Null-terminated Slang source code. */
+    /** Null-terminated shader source (GLSL on Vulkan, MSL on Metal). */
     const char *source;
 
     /** Entry-point function name within the source. */
@@ -89,6 +117,14 @@ typedef struct NEShaderSourceDesc {
 /* ======================================================================== */
 
 /**
+ * Set the optimization level used by all subsequent ne_shader_create_from_source() calls.
+ *
+ * Defaults to NE_SHADER_OPTIMIZATION_NONE (fastest compile, best diagnostics).
+ * Has no effect on shaders already compiled.
+ */
+void ne_renderer_set_shader_optimization(NERenderer *renderer, NEShaderOptimization level);
+
+/**
  * Create a shader from pre-compiled bytecode.
  *
  * Returns NE_SHADER_HANDLE_NULL on failure.
@@ -96,17 +132,16 @@ typedef struct NEShaderSourceDesc {
 NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc);
 
 /**
- * Create a shader by compiling Slang source at runtime.
+ * Create a shader by compiling source code at runtime.
  *
- * Requires the Slang shared library to be loadable at runtime.
- * Returns NE_SHADER_HANDLE_NULL on failure or if Slang is unavailable.
+ * Returns NE_SHADER_HANDLE_NULL on failure.
+ * On Vulkan, requires shaderc_shared.dll to be present next to the executable.
  */
 NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc);
 
 /**
  * Destroy a shader.
  *
- * Destruction is deferred until the GPU is no longer using the resource.
  * Null handles are silently ignored.
  */
 void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle);

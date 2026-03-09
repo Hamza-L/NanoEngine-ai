@@ -81,11 +81,62 @@ $(SPIRV_FRAG): shaders/spirv/basic.frag
 # Compiled shaders must exist before the executable is linked / run.
 EXTRA_OBJECT_DEPS += $(SPIRV_VERT) $(SPIRV_FRAG)
 
-.PHONY: deps deps-vulkan-headers deps-shaders
+# --- Dependencies: shaderc (runtime GLSL → SPIR-V compilation) -----------
+#
+# Headers are fetched from the shaderc GitHub repository (source-only zip,
+# no submodules — a few MB).  The DLL is NOT published as a standalone GitHub
+# release; it ships as part of the Vulkan SDK.  We copy it from there so it
+# is bundled next to the executable and can be found at runtime.
+#
+# Requires the Vulkan SDK to be installed:
+#   https://vulkan.lunarg.com/sdk/home
+# The installer sets the VULKAN_SDK environment variable automatically.
 
-deps: deps-vulkan-headers deps-shaders
+SHADERC_VERSION ?= 2024.3
+SHADERC_DIR := external/shaderc
+SHADERC_INCLUDE_DIR := $(SHADERC_DIR)/libshaderc/include
+SHADERC_HEADER_MARKER := $(SHADERC_INCLUDE_DIR)/shaderc/shaderc.h
+SHADERC_ZIP := $(BUILD_DIR)/deps/shaderc-$(SHADERC_VERSION).zip
+SHADERC_URL := https://github.com/google/shaderc/archive/refs/tags/v$(SHADERC_VERSION).zip
+
+# shaderc_shared.dll comes from the Vulkan SDK.
+# Hard-fail during make if the SDK is not installed — the engine requires it
+# for runtime shader compilation.
+ifndef VULKAN_SDK
+$(error VULKAN_SDK environment variable is not set. \
+Install the Vulkan SDK from https://vulkan.lunarg.com/sdk/home \
+to enable runtime GLSL shader compilation.)
+endif
+
+SHADERC_DLL_SRC := $(VULKAN_SDK)/Bin/shaderc_shared.dll
+SHADERC_DLL_DST := $(BUILD_DIR)/shaderc_shared.dll
+
+EXTRA_OBJECT_DEPS += $(SHADERC_HEADER_MARKER) $(SHADERC_DLL_DST)
+CFLAGS += -I$(SHADERC_INCLUDE_DIR)
+
+.PHONY: deps deps-vulkan-headers deps-shaders deps-shaderc
+
+deps: deps-vulkan-headers deps-shaders deps-shaderc
 
 deps-shaders: $(SPIRV_VERT) $(SPIRV_FRAG)
+
+deps-shaderc: $(SHADERC_HEADER_MARKER) $(SHADERC_DLL_DST)
+
+$(SHADERC_HEADER_MARKER):
+	@echo DEPS shaderc headers v$(SHADERC_VERSION)
+	@$(call mkdir_p,$(BUILD_DIR)/deps)
+	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; Invoke-WebRequest -Uri '$(SHADERC_URL)' -OutFile '$(subst /,\\,$(SHADERC_ZIP))';"
+	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; Expand-Archive -Force '$(subst /,\\,$(SHADERC_ZIP))' '$(subst /,\\,$(BUILD_DIR))\\deps';"
+	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; if (Test-Path '$(subst /,\\,$(SHADERC_DIR))') { Remove-Item -Recurse -Force '$(subst /,\\,$(SHADERC_DIR))' };"
+	@$(call mkdir_p,external)
+	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; $$src = Join-Path '$(subst /,\\,$(BUILD_DIR))\\deps' 'shaderc-$(SHADERC_VERSION)'; Move-Item -Force $$src '$(subst /,\\,$(SHADERC_DIR))';"
+
+# Copy shaderc_shared.dll from the Vulkan SDK into the build output directory.
+# The executable will find it at runtime because they share the same directory.
+$(SHADERC_DLL_DST):
+	@echo COPY shaderc_shared.dll from Vulkan SDK
+	@$(call mkdir_p,$(BUILD_DIR))
+	@copy /Y "$(subst /,\\,$(SHADERC_DLL_SRC))" "$(subst /,\\,$(SHADERC_DLL_DST))"
 
 deps-vulkan-headers: $(VULKAN_HEADERS_MARKER)
 

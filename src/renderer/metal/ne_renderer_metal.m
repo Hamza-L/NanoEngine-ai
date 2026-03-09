@@ -62,6 +62,8 @@ struct NERenderer {
     NEPipelineSlot *pipelines;
     uint32_t pipeline_count;
     uint32_t pipeline_cap;
+
+    NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
 };
 
 struct NERenderSurface {
@@ -588,6 +590,13 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
  * A future Slang integration path would first transpile Slang → MSL and then
  * feed the result into this same compilation path.
  */
+void ne_renderer_set_shader_optimization(NERenderer *renderer, NEShaderOptimization level) {
+    if (!renderer) {
+        return;
+    }
+    renderer->shader_optimization = level;
+}
+
 NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc) {
     if (!renderer || !desc || !desc->source || !desc->entry_point) {
         return NE_SHADER_HANDLE_NULL;
@@ -600,6 +609,31 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
 
     NSString *source = [NSString stringWithUTF8String:desc->source];
     MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
+
+    /*
+     * Metal does not expose a general optimisation level API.
+     * The closest equivalent is controlling fast-math: enabled for PERFORMANCE,
+     * disabled otherwise (preserves strict IEEE 754 compliance).
+     *
+     * mathMode was introduced in macOS 15 / iOS 18 to replace the deprecated
+     * fastMathEnabled property.  We use it when available and fall back to the
+     * legacy property on older SDKs.
+     */
+    const BOOL fast_math = (renderer->shader_optimization == NE_SHADER_OPTIMIZATION_PERFORMANCE)
+                           ? YES : NO;
+#if defined(__MAC_15_0) || defined(__IPHONE_18_0)
+    if (@available(macOS 15.0, iOS 18.0, *)) {
+        options.mathMode = fast_math ? MTLMathModeFast : MTLMathModeSafe;
+    } else {
+        /* Suppress deprecation warning: intentional fallback for older OS. */
+        _Pragma("clang diagnostic push")
+        _Pragma("clang diagnostic ignored \"-Wdeprecated-declarations\"")
+        options.fastMathEnabled = fast_math;
+        _Pragma("clang diagnostic pop")
+    }
+#else
+    options.fastMathEnabled = fast_math;
+#endif
 
     NSError *error = nil;
     id<MTLLibrary> library = [device newLibraryWithSource:source options:options error:&error];

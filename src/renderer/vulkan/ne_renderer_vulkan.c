@@ -16,6 +16,15 @@
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
 
+/*
+ * shaderc C header — included for type definitions and enum constants only.
+ * We do NOT link against shaderc_shared.lib; all functions are resolved at
+ * runtime via GetProcAddress so that the DLL is optional at link time.
+ * Including the header without linking is safe: the compiler never emits a
+ * direct call to a shaderc symbol, so the linker has nothing to resolve.
+ */
+#include <shaderc/shaderc.h>
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -110,6 +119,56 @@ enum {
     NE_VK_MAX_FRAMES_IN_FLIGHT = 2,
     NE_VK_POOL_INITIAL_CAP = 16,
 };
+
+/* ── shaderc dynamic-load state ─────────────────────────────────────────── */
+
+/*
+ * Function pointer typedefs for the shaderc C API functions we need.
+ * Defined here rather than relying on the header's own declarations so that
+ * the function pointer members of NEShaderc are unambiguously typed and
+ * independent of any SHADERC_EXPORT decoration the header may apply.
+ */
+typedef shaderc_compiler_t          (*ne_fn_shaderc_compiler_initialize)(void);
+typedef void                        (*ne_fn_shaderc_compiler_release)(shaderc_compiler_t);
+typedef shaderc_compile_options_t   (*ne_fn_shaderc_compile_options_initialize)(void);
+typedef void                        (*ne_fn_shaderc_compile_options_release)(shaderc_compile_options_t);
+typedef void                        (*ne_fn_shaderc_compile_options_set_optimization_level)(
+                                        shaderc_compile_options_t, shaderc_optimization_level);
+typedef shaderc_compilation_result_t (*ne_fn_shaderc_compile_into_spv)(
+                                        shaderc_compiler_t,
+                                        const char *, size_t,
+                                        shaderc_shader_kind,
+                                        const char *, const char *,
+                                        shaderc_compile_options_t);
+typedef void                         (*ne_fn_shaderc_result_release)(shaderc_compilation_result_t);
+typedef shaderc_compilation_status   (*ne_fn_shaderc_result_get_compilation_status)(shaderc_compilation_result_t);
+typedef const char                  *(*ne_fn_shaderc_result_get_error_message)(shaderc_compilation_result_t);
+typedef size_t                       (*ne_fn_shaderc_result_get_length)(shaderc_compilation_result_t);
+typedef const char                  *(*ne_fn_shaderc_result_get_bytes)(shaderc_compilation_result_t);
+
+typedef struct NEShaderc {
+    HMODULE lib;
+    bool    load_attempted; /* true after the first load attempt, success or not */
+
+    ne_fn_shaderc_compiler_initialize              compiler_initialize;
+    ne_fn_shaderc_compiler_release                 compiler_release;
+    ne_fn_shaderc_compile_options_initialize        compile_options_initialize;
+    ne_fn_shaderc_compile_options_release           compile_options_release;
+    ne_fn_shaderc_compile_options_set_optimization_level compile_options_set_optimization_level;
+    ne_fn_shaderc_compile_into_spv                 compile_into_spv;
+    ne_fn_shaderc_result_release                   result_release;
+    ne_fn_shaderc_result_get_compilation_status    result_get_compilation_status;
+    ne_fn_shaderc_result_get_error_message         result_get_error_message;
+    ne_fn_shaderc_result_get_length                result_get_length;
+    ne_fn_shaderc_result_get_bytes                 result_get_bytes;
+
+    /*
+     * Persistent compiler instance.  shaderc_compiler_t is documented as
+     * thread-safe and intended to be long-lived; we create it once and keep
+     * it alive for the lifetime of the renderer.
+     */
+    shaderc_compiler_t compiler;
+} NEShaderc;
 
 /* ── Buffer resource pool ───────────────────────────────────────────────── */
 
@@ -215,6 +274,10 @@ struct NERenderer {
     NEVulkanShaderSlot *shaders;
     uint32_t shader_count;
     uint32_t shader_cap;
+
+    /* Runtime GLSL → SPIR-V compilation via shaderc (loaded dynamically). */
+    NEShaderc shaderc;
+    NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
 
     struct NERenderSurface *surfaces;
 };
@@ -1285,6 +1348,16 @@ void ne_renderer_destroy(NERenderer *r) {
     r->shader_count = 0;
     r->shader_cap = 0;
 
+    /* Release the shaderc compiler and unload the DLL. */
+    if (r->shaderc.compiler && r->shaderc.compiler_release) {
+        r->shaderc.compiler_release(r->shaderc.compiler);
+        r->shaderc.compiler = NULL;
+    }
+    if (r->shaderc.lib) {
+        FreeLibrary(r->shaderc.lib);
+        r->shaderc.lib = NULL;
+    }
+
     /* Destroy staging buffer and transfer command pool. */
     if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
         r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
@@ -2063,12 +2136,149 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
     return (NEShaderHandle){ .id = slot_index + 1 };
 }
 
+/* ── shaderc helpers ─────────────────────────────────────────────────────── */
+
+/**
+ * Load shaderc_shared.dll and resolve all required function pointers.
+ * Creates the persistent compiler instance on success.
+ * Returns true if shaderc is ready; false on any failure (already logs error).
+ *
+ * Subsequent calls are no-ops — the result of the first attempt is cached in
+ * r->shaderc.load_attempted so we never hammer LoadLibraryA on every compile.
+ */
+static bool ne_vk_shaderc_load(NERenderer *r) {
+    NEShaderc *sc = &r->shaderc;
+
+    if (sc->load_attempted) {
+        return sc->lib != NULL && sc->compiler != NULL;
+    }
+    sc->load_attempted = true;
+
+    sc->lib = LoadLibraryA("shaderc_shared.dll");
+    if (!sc->lib) {
+        NE_LOG_ERROR("ne_shader_create_from_source: failed to load shaderc_shared.dll. "
+                     "Ensure the Vulkan SDK is installed and shaderc_shared.dll is next to the executable.");
+        return false;
+    }
+
+#define NE_LOAD_SHADERC(field, symbol) \
+    sc->field = (ne_fn_##field)GetProcAddress(sc->lib, #symbol); \
+    if (!sc->field) { \
+        NE_LOG_ERROR("ne_vk_shaderc_load: missing symbol '%s' in shaderc_shared.dll", #symbol); \
+        FreeLibrary(sc->lib); sc->lib = NULL; return false; \
+    }
+
+    NE_LOAD_SHADERC(compiler_initialize,                     shaderc_compiler_initialize)
+    NE_LOAD_SHADERC(compiler_release,                        shaderc_compiler_release)
+    NE_LOAD_SHADERC(compile_options_initialize,               shaderc_compile_options_initialize)
+    NE_LOAD_SHADERC(compile_options_release,                  shaderc_compile_options_release)
+    NE_LOAD_SHADERC(compile_options_set_optimization_level,   shaderc_compile_options_set_optimization_level)
+    NE_LOAD_SHADERC(compile_into_spv,                         shaderc_compile_into_spv)
+    NE_LOAD_SHADERC(result_release,                           shaderc_result_release)
+    NE_LOAD_SHADERC(result_get_compilation_status,            shaderc_result_get_compilation_status)
+    NE_LOAD_SHADERC(result_get_error_message,                 shaderc_result_get_error_message)
+    NE_LOAD_SHADERC(result_get_length,                        shaderc_result_get_length)
+    NE_LOAD_SHADERC(result_get_bytes,                         shaderc_result_get_bytes)
+
+#undef NE_LOAD_SHADERC
+
+    sc->compiler = sc->compiler_initialize();
+    if (!sc->compiler) {
+        NE_LOG_ERROR("ne_vk_shaderc_load: shaderc_compiler_initialize() returned NULL");
+        FreeLibrary(sc->lib);
+        sc->lib = NULL;
+        return false;
+    }
+
+    return true;
+}
+
+static shaderc_shader_kind ne_stage_to_shaderc_kind(NEShaderStage stage) {
+    switch (stage) {
+    case NE_SHADER_STAGE_VERTEX:   return shaderc_vertex_shader;
+    case NE_SHADER_STAGE_FRAGMENT: return shaderc_fragment_shader;
+    case NE_SHADER_STAGE_COMPUTE:  return shaderc_compute_shader;
+    default:                       return shaderc_vertex_shader;
+    }
+}
+
+static shaderc_optimization_level ne_optimization_to_shaderc(NEShaderOptimization level) {
+    switch (level) {
+    case NE_SHADER_OPTIMIZATION_NONE:        return shaderc_optimization_level_zero;
+    case NE_SHADER_OPTIMIZATION_SIZE:        return shaderc_optimization_level_size;
+    case NE_SHADER_OPTIMIZATION_PERFORMANCE: return shaderc_optimization_level_performance;
+    default:                                 return shaderc_optimization_level_zero;
+    }
+}
+
+void ne_renderer_set_shader_optimization(NERenderer *renderer, NEShaderOptimization level) {
+    if (!renderer) {
+        return;
+    }
+    renderer->shader_optimization = level;
+}
+
 NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc) {
-    (void)renderer;
-    (void)desc;
-    NE_LOG_WARN("ne_shader_create_from_source: runtime source compilation is not supported on "
-                "the Vulkan backend. Use ne_shader_create() with pre-compiled SPIR-V instead.");
-    return NE_SHADER_HANDLE_NULL;
+    if (!renderer || !desc || !desc->source || !desc->entry_point) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    if (!ne_vk_shaderc_load(renderer)) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    NEShaderc *sc = &renderer->shaderc;
+
+    shaderc_compile_options_t options = sc->compile_options_initialize();
+    if (!options) {
+        NE_LOG_ERROR("ne_shader_create_from_source: shaderc_compile_options_initialize() failed");
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    sc->compile_options_set_optimization_level(
+        options, ne_optimization_to_shaderc(renderer->shader_optimization));
+
+    const char *filename = desc->filename ? desc->filename : "<unknown>";
+    const shaderc_shader_kind kind = ne_stage_to_shaderc_kind(desc->stage);
+
+    shaderc_compilation_result_t result = sc->compile_into_spv(
+        sc->compiler,
+        desc->source, strlen(desc->source),
+        kind,
+        filename, desc->entry_point,
+        options);
+
+    sc->compile_options_release(options);
+
+    if (!result) {
+        NE_LOG_ERROR("ne_shader_create_from_source: shaderc_compile_into_spv() returned NULL (%s)",
+                     filename);
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    const shaderc_compilation_status status = sc->result_get_compilation_status(result);
+    if (status != shaderc_compilation_status_success) {
+        NE_LOG_ERROR("GLSL compilation failed (%s):\n%s",
+                     filename, sc->result_get_error_message(result));
+        sc->result_release(result);
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    /*
+     * Reuse ne_shader_create with the compiled SPIR-V bytes.
+     * vkCreateShaderModule copies the bytecode internally so it is safe to
+     * release the shaderc result immediately after ne_shader_create returns.
+     */
+    const NEShaderDesc bytecode_desc = {
+        .stage         = desc->stage,
+        .bytecode      = sc->result_get_bytes(result),
+        .bytecode_size = sc->result_get_length(result),
+        .entry_point   = desc->entry_point,
+    };
+
+    const NEShaderHandle handle = ne_shader_create(renderer, &bytecode_desc);
+    sc->result_release(result);
+    return handle;
 }
 
 void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
