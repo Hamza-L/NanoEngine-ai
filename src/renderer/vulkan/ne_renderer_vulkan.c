@@ -1529,6 +1529,11 @@ void ne_renderer_destroy(NERenderer *r) {
         return;
     }
 
+    /* Drain the GPU before tearing down any resources. */
+    if (r->device != VK_NULL_HANDLE && r->fns.vkDeviceWaitIdle) {
+        (void)r->fns.vkDeviceWaitIdle(r->device);
+    }
+
     /* Destroy surfaces first (this cleans up swapchains). */
     struct NERenderSurface *s = r->surfaces;
     while (s) {
@@ -1633,7 +1638,6 @@ void ne_renderer_destroy(NERenderer *r) {
     r->transfer_cmd = VK_NULL_HANDLE;
 
     if (r->device != VK_NULL_HANDLE && r->fns.vkDestroyDevice) {
-        (void)r->fns.vkDeviceWaitIdle(r->device);
         r->fns.vkDestroyDevice(r->device, NULL);
         r->device = VK_NULL_HANDLE;
         r->queue = VK_NULL_HANDLE;
@@ -2987,6 +2991,11 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     }
 
     NEVulkanPipelineSlot *slot = &renderer->pipelines[index];
+
+    /* Ensure the GPU is done with any command buffers referencing this pipeline. */
+    if (renderer->device != VK_NULL_HANDLE && renderer->fns.vkDeviceWaitIdle) {
+        (void)renderer->fns.vkDeviceWaitIdle(renderer->device);
+    }
 
     if (slot->pipeline != VK_NULL_HANDLE && renderer->fns.vkDestroyPipeline) {
         renderer->fns.vkDestroyPipeline(renderer->device, slot->pipeline, NULL);
