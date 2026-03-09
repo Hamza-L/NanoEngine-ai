@@ -3,9 +3,6 @@
 #include "ne_log.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
-#include "ne_renderer_pass.h"
-#include "ne_renderer_pipeline.h"
-#include "ne_renderer_shader.h"
 #include "ne_window.h"
 
 /*
@@ -54,6 +51,8 @@ static const Vertex k_triangle_vertices[] = {
     {{ 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},  /* right  — blue  */
 };
 
+static const uint16_t k_triangle_indices[] = {0, 1, 2};
+
 /* ── Main ───────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -68,7 +67,7 @@ int main(void) {
     }
 
     NEWindow *window = ne_window_create(app, &(NEWindowDesc){
-                                                 .title = "NanoEngine2 — Triangle",
+                                                 .title = "NanoEngine2 — Buffer Test",
                                                  .x = 100,
                                                  .y = 100,
                                                  .width = 800,
@@ -109,45 +108,11 @@ int main(void) {
         return 1;
     }
 
-    /* ── Load shader source from disk ──────────────────────────────────── */
+    /* ── Test GPU Buffer Creation ──────────────────────────────────────── */
 
-    void *shader_source = ne_file_read("shaders/metal/basic.metal", NULL);
-    if (!shader_source) {
-        NE_LOG_ERROR("failed to load shader file");
-        ne_renderer_destroy_surface(renderer, surface);
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
+    NE_LOG_INFO("testing GPU buffer creation...");
 
-    NEShaderHandle vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage = NE_SHADER_STAGE_VERTEX,
-        .source = shader_source,
-        .entry_point = "vertexMain",
-        .filename = "basic.metal",
-    });
-
-    NEShaderHandle fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage = NE_SHADER_STAGE_FRAGMENT,
-        .source = shader_source,
-        .entry_point = "fragmentMain",
-        .filename = "basic.metal",
-    });
-
-    ne_file_free(shader_source);
-
-    if (!ne_shader_handle_valid(vertex_shader) || !ne_shader_handle_valid(fragment_shader)) {
-        NE_LOG_ERROR("failed to compile shaders");
-        ne_renderer_destroy_surface(renderer, surface);
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
-
-    /* ── Create vertex buffer ──────────────────────────────────────────── */
-
+    /* Create vertex buffer with initial data */
     NEBufferHandle vbo = ne_buffer_create(renderer, &(NEBufferDesc){
         .size = sizeof(k_triangle_vertices),
         .usage = NE_BUFFER_USAGE_VERTEX,
@@ -162,63 +127,65 @@ int main(void) {
         ne_app_destroy(app);
         return 1;
     }
+    NE_LOG_INFO("✓ vertex buffer created (handle id=%u, size=%zu bytes)", vbo.id, sizeof(k_triangle_vertices));
 
-    /* ── Create graphics pipeline ──────────────────────────────────────── */
-
-    const NEVertexAttribute vertex_attrs[] = {
-        { .location = 0, .format = NE_VERTEX_FORMAT_FLOAT2, .offset = offsetof(Vertex, position) },
-        { .location = 1, .format = NE_VERTEX_FORMAT_FLOAT3, .offset = offsetof(Vertex, color) },
-    };
-
-    const NEVertexBufferLayout vertex_layout = {
-        .stride = sizeof(Vertex),
-        .attributes = vertex_attrs,
-        .attribute_count = 2,
-    };
-
-    NEPipelineHandle pipeline = ne_pipeline_create(renderer, &(NEPipelineDesc){
-        .vertex_shader = vertex_shader,
-        .fragment_shader = fragment_shader,
-        .vertex_layouts = &vertex_layout,
-        .vertex_layout_count = 1,
-        .topology = NE_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    /* Create index buffer */
+    NEBufferHandle ibo = ne_buffer_create(renderer, &(NEBufferDesc){
+        .size = sizeof(k_triangle_indices),
+        .usage = NE_BUFFER_USAGE_INDEX,
+        .initial_data = k_triangle_indices,
     });
 
-    if (!ne_pipeline_handle_valid(pipeline)) {
-        NE_LOG_ERROR("failed to create pipeline");
+    if (!ne_buffer_handle_valid(ibo)) {
+        NE_LOG_ERROR("failed to create index buffer");
         ne_renderer_destroy_surface(renderer, surface);
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);
         ne_app_destroy(app);
         return 1;
     }
+    NE_LOG_INFO("✓ index buffer created (handle id=%u, size=%zu bytes)", ibo.id, sizeof(k_triangle_indices));
 
-    NE_LOG_INFO("triangle demo initialized — press Escape to quit");
+    /* Test buffer update */
+    Vertex updated_vertices[] = {
+        {{ 0.2f,  0.5f}, {1.0f, 0.5f, 0.0f}},
+        {{-0.5f, -0.3f}, {0.5f, 1.0f, 0.0f}},
+        {{ 0.5f, -0.3f}, {0.0f, 0.5f, 1.0f}},
+    };
 
-    /* ── Main loop ─────────────────────────────────────────────────────── */
+    ne_buffer_update(renderer, vbo, updated_vertices, sizeof(updated_vertices), 0);
+    NE_LOG_INFO("✓ vertex buffer updated successfully");
 
-    while (ne_window_is_open(window) && ne_app_poll_events(app)) {
+    NE_LOG_INFO("buffer implementation test completed successfully!");
+    NE_LOG_INFO("press Escape to quit or window will auto-close in 3 seconds");
+
+    /* ── Main loop (simple clear loop until escape or timeout) ─────────────── */
+
+    int frame_count = 0;
+    const int max_frames = 180;  /* ~3 seconds at 60 FPS */
+
+    while (ne_window_is_open(window) && ne_app_poll_events(app) && frame_count < max_frames) {
         NERenderPass *pass = ne_renderer_begin_frame(renderer, surface);
         if (pass) {
-            ne_render_pass_set_pipeline(pass, pipeline);
-            ne_render_pass_set_vertex_buffer(pass, 0, vbo);
-            ne_render_pass_draw(pass, 0, 3);
+            /* For now, just clear the screen. Actual rendering comes later. */
             ne_renderer_end_frame(renderer, pass);
         } else {
             NE_PLATFORM_YIELD_MS_1();
         }
+        frame_count++;
     }
+
+    NE_LOG_INFO("test completed after %d frames", frame_count);
 
     /* ── Cleanup ───────────────────────────────────────────────────────── */
 
-    ne_pipeline_destroy(renderer, pipeline);
+    ne_buffer_destroy(renderer, ibo);
     ne_buffer_destroy(renderer, vbo);
-    ne_shader_destroy(renderer, fragment_shader);
-    ne_shader_destroy(renderer, vertex_shader);
     ne_renderer_destroy_surface(renderer, surface);
     ne_renderer_destroy(renderer);
     ne_window_destroy(window);
     ne_app_destroy(app);
 
+    NE_LOG_INFO("application shutdown complete");
     return 0;
 }

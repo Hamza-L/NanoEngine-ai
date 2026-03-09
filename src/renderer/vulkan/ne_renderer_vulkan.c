@@ -12,6 +12,7 @@
 
 #include "ne_log.h"
 #include "ne_renderer.h"
+#include "ne_renderer_buffer.h"
 #include "ne_window.h"
 
 #include <stdbool.h>
@@ -90,6 +91,7 @@ typedef struct NEVulkanFns {
     PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
     PFN_vkCreateBuffer vkCreateBuffer;
     PFN_vkDestroyBuffer vkDestroyBuffer;
+    PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
     PFN_vkAllocateMemory vkAllocateMemory;
     PFN_vkFreeMemory vkFreeMemory;
     PFN_vkBindBufferMemory vkBindBufferMemory;
@@ -190,10 +192,10 @@ struct NERenderer {
      * - ne_render_pass_bind_buffer(): future function to bind SSBOs to pipelines
      * - Pipeline layout creation: will include descriptor set layouts
      */
-    /* VkDescriptorPool descriptor_pool;        /* Placeholder: not yet created */ */
-    /* uint32_t descriptor_pool_size;           /* Placeholder: pool capacity */ */
-    /* VkDescriptorSetLayout *layout_cache;    /* Placeholder: reuse layouts */ */
-    /* uint32_t layout_cache_count;            /* Placeholder: active layouts */ */
+    /* VkDescriptorPool descriptor_pool;         Placeholder: not yet created  */
+    /* uint32_t descriptor_pool_size;            Placeholder: pool capacity  */
+    /* VkDescriptorSetLayout *layout_cache;     Placeholder: reuse layouts  */
+    /* uint32_t layout_cache_count;             Placeholder: active layouts */
 
     struct NERenderSurface *surfaces;
 };
@@ -468,6 +470,7 @@ static bool ne_vk_load_device_fns(NERenderer *r) {
     /* Buffer management functions */
     f->vkCreateBuffer = (PFN_vkCreateBuffer)ne_vk_get_device(f, r->device, "vkCreateBuffer");
     f->vkDestroyBuffer = (PFN_vkDestroyBuffer)ne_vk_get_device(f, r->device, "vkDestroyBuffer");
+    f->vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)ne_vk_get_device(f, r->device, "vkGetBufferMemoryRequirements");
     f->vkAllocateMemory = (PFN_vkAllocateMemory)ne_vk_get_device(f, r->device, "vkAllocateMemory");
     f->vkFreeMemory = (PFN_vkFreeMemory)ne_vk_get_device(f, r->device, "vkFreeMemory");
     f->vkBindBufferMemory = (PFN_vkBindBufferMemory)ne_vk_get_device(f, r->device, "vkBindBufferMemory");
@@ -480,7 +483,7 @@ static bool ne_vk_load_device_fns(NERenderer *r) {
            f->vkAcquireNextImageKHR && f->vkQueueSubmit && f->vkQueuePresentKHR && f->vkCreateSemaphore && f->vkCreateFence &&
            f->vkWaitForFences && f->vkResetFences && f->vkCreateCommandPool && f->vkResetCommandBuffer && f->vkAllocateCommandBuffers &&
            f->vkBeginCommandBuffer && f->vkEndCommandBuffer && f->vkCmdPipelineBarrier && f->vkCmdClearColorImage &&
-           f->vkCreateBuffer && f->vkDestroyBuffer && f->vkAllocateMemory && f->vkFreeMemory && f->vkBindBufferMemory &&
+           f->vkCreateBuffer && f->vkDestroyBuffer && f->vkGetBufferMemoryRequirements && f->vkAllocateMemory && f->vkFreeMemory && f->vkBindBufferMemory &&
            f->vkMapMemory && f->vkUnmapMemory && f->vkFlushMappedMemoryRanges && f->vkCmdCopyBuffer;
 }
 
@@ -595,12 +598,12 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     }
 
     /* Create a single transfer command pool for buffer staging operations.
-     * Uses TRANSIENT_BIT since these are temporary, short-lived command buffers.
+     * Uses TRANSIENT_BIT for optimization and RESET_COMMAND_BUFFER_BIT to allow reuse.
      */
     VkCommandPoolCreateInfo pool_info;
     memset(&pool_info, 0, sizeof(pool_info));
     pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pool_info.queueFamilyIndex = r->queue_family_index;
 
     vr = r->fns.vkCreateCommandPool(r->device, &pool_info, NULL, &r->transfer_cmd_pool);
@@ -828,9 +831,9 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
         return false;
     }
 
-    /* Map the staging memory for CPU access */
+    /* Map the staging memory for CPU access (use actual allocated size) */
     void *mapped_ptr = NULL;
-    vr = r->fns.vkMapMemory(r->device, r->staging_memory, 0, alloc_size, 0, &mapped_ptr);
+    vr = r->fns.vkMapMemory(r->device, r->staging_memory, 0, mem_req.size, 0, &mapped_ptr);
     if (vr != VK_SUCCESS || !mapped_ptr) {
         NE_LOG_ERROR("vkMapMemory (staging) failed (vr=%d)", (int)vr);
         r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
@@ -841,7 +844,7 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
     }
 
     r->staging_mapped = mapped_ptr;
-    r->staging_size = alloc_size;
+    r->staging_size = mem_req.size;
 
     return true;
 }
@@ -1759,13 +1762,13 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         /* Copy initial data into the staging buffer */
         memcpy(renderer->staging_mapped, desc->initial_data, desc->size);
 
-        /* Flush the mapped memory range */
+        /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
         VkMappedMemoryRange flush_range;
         memset(&flush_range, 0, sizeof(flush_range));
         flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
         flush_range.memory = renderer->staging_memory;
         flush_range.offset = 0;
-        flush_range.size = desc->size;
+        flush_range.size = VK_WHOLE_SIZE;
 
         vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
         if (vr != VK_SUCCESS) {
@@ -1850,13 +1853,13 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     /* Copy the updated data into the staging buffer */
     memcpy((uint8_t *)renderer->staging_mapped + offset, data, size);
 
-    /* Flush the mapped memory range */
+    /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
     VkMappedMemoryRange flush_range;
     memset(&flush_range, 0, sizeof(flush_range));
     flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
     flush_range.memory = renderer->staging_memory;
-    flush_range.offset = offset;
-    flush_range.size = size;
+    flush_range.offset = 0;
+    flush_range.size = VK_WHOLE_SIZE;
 
     VkResult vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
     if (vr != VK_SUCCESS) {
