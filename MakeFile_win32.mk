@@ -11,8 +11,6 @@ rmdir_rf = if exist "$(subst /,\\,$(1))" rmdir /s /q "$(subst /,\\,$(1))"
 
 # --- Sources --------------------------------------------------------------
 SRC_C += src/platform/win32/window_win32.c
-
-# Vulkan renderer backend (Windows).
 SRC_C += src/renderer/vulkan/ne_renderer_vulkan.c
 
 # --- Compile flags --------------------------------------------------------
@@ -34,6 +32,7 @@ SHADERS_DIR := $(BUILD_DIR)/shaders
 LDFLAGS += -Xlinker user32.lib
 LDFLAGS += -Xlinker gdi32.lib
 LDFLAGS += -Xlinker dwmapi.lib
+LDFLAGS += -g
 
 LDASANFLAGS := clang_rt.asan-x86_64.lib
 

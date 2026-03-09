@@ -29,7 +29,7 @@ TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 # default goal stays consistent.
 .DEFAULT_GOAL := all
 
-CFLAGS := -std=c2x -O2 -g -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
+CFLAGS := -std=c2x -g -DDEBUG -fdeclspec -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
 OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
 

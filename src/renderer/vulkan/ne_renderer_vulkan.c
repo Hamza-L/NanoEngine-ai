@@ -2050,7 +2050,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
     slot->occupied    = true;
     slot->stage       = (uint32_t)desc->stage;
     slot->module      = module;
-    slot->entry_point = strdup(desc->entry_point);
+    slot->entry_point = _strdup(desc->entry_point);
 
     if (!slot->entry_point) {
         NE_LOG_ERROR("ne_shader_create: out of memory copying entry point name");
