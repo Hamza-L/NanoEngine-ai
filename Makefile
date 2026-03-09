@@ -1,6 +1,5 @@
 CC := clang
 OBJC := clang
-BUILD_DIR := build
 
 # Public target name (what users type): no extension, consistent across platforms.
 APP_NAME := NanoEngine
@@ -12,6 +11,17 @@ else
 EXE_EXT :=
 endif
 
+# Determine if this is a test build based on MAKECMDGOALS
+ifeq ($(filter test,$(MAKECMDGOALS)),test)
+BUILD_DIR := build/test
+BUILD_MODE := test
+TESTING_ENABLED := 1
+else
+BUILD_DIR := build
+BUILD_MODE := normal
+TESTING_ENABLED := 0
+endif
+
 OUTPUT := $(BUILD_DIR)/$(APP_NAME)$(EXE_EXT)
 TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 
@@ -19,7 +29,7 @@ TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 # default goal stays consistent.
 .DEFAULT_GOAL := all
 
-CFLAGS := -std=c2x -O2 -g -Wall -Wextra -Wpedantic -Werror
+CFLAGS := -std=c2x -O2 -g -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
 OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
 
@@ -28,7 +38,9 @@ SRC_C := src/main.c src/ne_log.c src/ne_file.c
 SRC_M :=
 
 # Test sources (only compiled when TESTING_ENABLED=1)
-SRC_C_TEST := src/test_buffer.c
+ifeq ($(TESTING_ENABLED),1)
+SRC_C += src/test_buffer.c
+endif
 
 # Platform makefiles can append to this to force prerequisites before any
 # object is compiled (e.g. downloaded headers).
@@ -50,17 +62,7 @@ $(error Unsupported platform for step 1. Add Linux target if needed)
 endif
 endif
 
-# Determine source files and compiler flags based on build mode
-# Check if 'test' is in the make goals
-ifeq ($(filter test,$(MAKECMDGOALS)),test)
-SRC_C_ALL := $(SRC_C) $(SRC_C_TEST)
-CFLAGS += -DTESTING_ENABLED=1
-else
-SRC_C_ALL := $(SRC_C)
-CFLAGS += -DTESTING_ENABLED=0
-endif
-
-OBJ_C := $(SRC_C_ALL:%.c=$(BUILD_DIR)/%.$(OBJ_EXT))
+OBJ_C := $(SRC_C:%.c=$(BUILD_DIR)/%.$(OBJ_EXT))
 OBJ_M := $(SRC_M:%.m=$(BUILD_DIR)/%.$(OBJ_EXT))
 OBJS := $(OBJ_C) $(OBJ_M)
 
@@ -79,7 +81,7 @@ all: $(APP_NAME)
 # Test build target:
 #   make test
 # builds with TESTING_ENABLED=1 and test sources included.
-test: $(TEST_OUTPUT)
+test: $(APP_NAME)
 
 # User-facing target without extension.
 $(APP_NAME): $(OUTPUT)
@@ -88,11 +90,6 @@ $(APP_NAME): $(OUTPUT)
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
 	@$(CC) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
-
-# Test executable target
-$(TEST_OUTPUT): $(BUILD_DIR) $(OBJS)
-	@echo LINK $(TEST_OUTPUT)
-	@$(CC) $(OBJS) -o $(TEST_OUTPUT) $(LDFLAGS)
 
 $(BUILD_DIR):
 	@$(call mkdir_p,$(BUILD_DIR))
@@ -111,4 +108,4 @@ $(BUILD_DIR)/%.$(OBJ_EXT): %.m $(EXTRA_OBJECT_DEPS)
 	@$(OBJC) $(CFLAGS) $(OBJCFLAGS) -Iinclude $(DEPFLAGS) -MF $(@:.$(OBJ_EXT)=.d) -c $< -o $@
 
 clean:
-	@$(call rmdir_rf,$(BUILD_DIR))
+	@$(call rmdir_rf,build)
