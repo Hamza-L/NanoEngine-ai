@@ -98,9 +98,9 @@ int main(void) {
         return 1;
     }
 
-    NERenderSurface *surface = ne_renderer_create_surface(
-        renderer, window,
-        &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.12f, 1.0f}});
+    NERenderSurface *surface = ne_renderer_create_surface(renderer,
+                                                          window,
+                                                          &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.12f, 1.0f}});
     if (!surface) {
         NE_LOG_ERROR("failed to create render surface");
         ne_renderer_destroy(renderer);
