@@ -7,14 +7,37 @@
 #include "ne_app.h"
 #include "ne_log.h"
 #include "ne_renderer.h"
+#include "ne_renderer_shader.h"
 #include "ne_window.h"
 
+#include <dispatch/dispatch.h>
 #include <stdlib.h>
 #include <string.h>
+
+enum {
+    NE_MTL_MAX_FRAMES_IN_FLIGHT = 2,
+    NE_MTL_SHADER_POOL_INITIAL_CAP = 16,
+};
+
+/* ── Shader pool ────────────────────────────────────────────────────────── */
+
+typedef struct NEShaderSlot {
+    bool occupied;
+    NEShaderStage stage;
+    void *library;     /* id<MTLLibrary>  */
+    void *function;    /* id<MTLFunction> */
+    char *entry_point; /* strdup'd copy   */
+} NEShaderSlot;
+
+/* ── Renderer ───────────────────────────────────────────────────────────── */
 
 struct NERenderer {
     void *device;
     void *queue;
+
+    NEShaderSlot *shaders;
+    uint32_t shader_count;
+    uint32_t shader_cap;
 };
 
 struct NERenderSurface {
@@ -26,6 +49,9 @@ struct NERenderSurface {
     void *command_buffer; /* id<MTLCommandBuffer> */
 
     float clear_color[4];
+
+    /* Frame pacing: limits how far the CPU can get ahead of the GPU. */
+    dispatch_semaphore_t frame_semaphore;
 };
 
 /**
@@ -53,6 +79,48 @@ static id<CAMetalDrawable> ne_surface_get_drawable(const NERenderSurface *surfac
 
 static id<MTLCommandBuffer> ne_surface_get_command_buffer(const NERenderSurface *surface) {
     return surface && surface->command_buffer ? (__bridge id<MTLCommandBuffer>)surface->command_buffer : nil;
+}
+
+/**
+ * Finds an available slot in the shader pool, growing it if necessary.
+ * Returns the slot index, or UINT32_MAX on allocation failure.
+ */
+static uint32_t ne_shader_pool_alloc(NERenderer *renderer) {
+    /* Scan for a free slot. */
+    for (uint32_t i = 0; i < renderer->shader_cap; i++) {
+        if (!renderer->shaders[i].occupied) {
+            return i;
+        }
+    }
+
+    /* Grow the pool. */
+    uint32_t new_cap = renderer->shader_cap == 0
+                           ? NE_MTL_SHADER_POOL_INITIAL_CAP
+                           : renderer->shader_cap * 2;
+    NEShaderSlot *new_slots = (NEShaderSlot *)realloc(renderer->shaders, new_cap * sizeof(NEShaderSlot));
+    if (!new_slots) {
+        return UINT32_MAX;
+    }
+    memset(new_slots + renderer->shader_cap, 0, (new_cap - renderer->shader_cap) * sizeof(NEShaderSlot));
+
+    uint32_t index = renderer->shader_cap;
+    renderer->shaders = new_slots;
+    renderer->shader_cap = new_cap;
+    return index;
+}
+
+static void ne_shader_slot_release(NEShaderSlot *slot) {
+    if (slot->function) {
+        (void)CFBridgingRelease(slot->function);
+        slot->function = NULL;
+    }
+    if (slot->library) {
+        (void)CFBridgingRelease(slot->library);
+        slot->library = NULL;
+    }
+    free(slot->entry_point);
+    slot->entry_point = NULL;
+    slot->occupied = false;
 }
 
 static id<MTLDevice> ne_renderer_get_device(const NERenderer *renderer) {
@@ -101,6 +169,17 @@ void ne_renderer_destroy(NERenderer *renderer) {
     if (!renderer) {
         return;
     }
+
+    /* Release all live shaders. */
+    for (uint32_t i = 0; i < renderer->shader_cap; i++) {
+        if (renderer->shaders[i].occupied) {
+            ne_shader_slot_release(&renderer->shaders[i]);
+        }
+    }
+    free(renderer->shaders);
+    renderer->shaders = NULL;
+    renderer->shader_count = 0;
+    renderer->shader_cap = 0;
 
     if (renderer->queue) {
         (void)CFBridgingRelease(renderer->queue);
@@ -179,6 +258,8 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *renderer, NEWindow *wind
         memcpy(surface->clear_color, desc->clear_color_rgba, sizeof(surface->clear_color));
     }
 
+    surface->frame_semaphore = dispatch_semaphore_create(NE_MTL_MAX_FRAMES_IN_FLIGHT);
+
     objc_setAssociatedObject(view, g_surface_assoc_key, [NSValue valueWithPointer:surface], OBJC_ASSOCIATION_RETAIN_NONATOMIC);
 
     return surface;
@@ -250,6 +331,9 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
         return NULL;
     }
 
+    /* Block until a frame slot is available (at most NE_MTL_MAX_FRAMES_IN_FLIGHT in flight). */
+    dispatch_semaphore_wait(surface->frame_semaphore, DISPATCH_TIME_FOREVER);
+
     CAMetalLayer *layer = ne_surface_get_layer(surface);
     if (!layer) {
         return NULL;
@@ -314,6 +398,13 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
         return;
     }
 
+    /* Signal the frame semaphore when the GPU finishes this command buffer. */
+    dispatch_semaphore_t sem = surface->frame_semaphore;
+    [command_buffer addCompletedHandler:^(id<MTLCommandBuffer> _Nonnull cb) {
+        (void)cb;
+        dispatch_semaphore_signal(sem);
+    }];
+
     [command_buffer presentDrawable:drawable];
     [command_buffer commit];
 
@@ -324,4 +415,119 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
     surface->drawable = NULL;
 
     pass->surface = NULL;
+}
+
+/* ── Shaders ────────────────────────────────────────────────────────────── */
+
+/**
+ * Common helper: given an MTLLibrary and an entry point name, resolves the
+ * MTLFunction, allocates a pool slot, and returns the handle.
+ */
+static NEShaderHandle ne_shader_finish_create(NERenderer *renderer, NEShaderStage stage,
+                                              id<MTLLibrary> library, const char *entry_point) {
+    NSString *ep = [NSString stringWithUTF8String:entry_point];
+    id<MTLFunction> function = [library newFunctionWithName:ep];
+    if (!function) {
+        NE_LOG_ERROR("shader entry point '%s' not found in library", entry_point);
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    uint32_t index = ne_shader_pool_alloc(renderer);
+    if (index == UINT32_MAX) {
+        NE_LOG_ERROR("shader pool allocation failed");
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    NEShaderSlot *slot = &renderer->shaders[index];
+    slot->occupied = true;
+    slot->stage = stage;
+    slot->library = (__bridge_retained void *)library;
+    slot->function = (__bridge_retained void *)function;
+    slot->entry_point = strdup(entry_point);
+    renderer->shader_count++;
+
+    return (NEShaderHandle){ .id = index + 1 };
+}
+
+/**
+ * Create a shader from pre-compiled bytecode (metallib).
+ *
+ * NOTE: Each call creates its own MTLLibrary even if the same bytecode blob is
+ *       passed multiple times (e.g. vertex + fragment from the same metallib).
+ *       A library cache keyed on the data pointer/size could deduplicate this
+ *       in the future if it becomes a bottleneck.
+ */
+NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) {
+    if (!renderer || !desc || !desc->bytecode || desc->bytecode_size == 0 || !desc->entry_point) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    id<MTLDevice> device = ne_renderer_get_device(renderer);
+    if (!device) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    dispatch_data_t data = dispatch_data_create(desc->bytecode, desc->bytecode_size,
+                                                NULL, DISPATCH_DATA_DESTRUCTOR_DEFAULT);
+    if (!data) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    NSError *error = nil;
+    id<MTLLibrary> library = [device newLibraryWithData:data error:&error];
+    if (!library) {
+        NE_LOG_ERROR("failed to create Metal library from bytecode: %s",
+                     error ? [[error localizedDescription] UTF8String] : "unknown error");
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    return ne_shader_finish_create(renderer, desc->stage, library, desc->entry_point);
+}
+
+/**
+ * Create a shader by compiling MSL source at runtime.
+ *
+ * On the Metal backend the source is expected to be Metal Shading Language.
+ * A future Slang integration path would first transpile Slang → MSL and then
+ * feed the result into this same compilation path.
+ */
+NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc) {
+    if (!renderer || !desc || !desc->source || !desc->entry_point) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    id<MTLDevice> device = ne_renderer_get_device(renderer);
+    if (!device) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    NSString *source = [NSString stringWithUTF8String:desc->source];
+    MTLCompileOptions *options = [[MTLCompileOptions alloc] init];
+
+    NSError *error = nil;
+    id<MTLLibrary> library = [device newLibraryWithSource:source options:options error:&error];
+    if (!library) {
+        NE_LOG_ERROR("failed to compile MSL source%s%s: %s",
+                     desc->filename ? " (" : "",
+                     desc->filename ? desc->filename : "",
+                     error ? [[error localizedDescription] UTF8String] : "unknown error");
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    return ne_shader_finish_create(renderer, desc->stage, library, desc->entry_point);
+}
+
+void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
+    if (!renderer || !ne_shader_handle_valid(handle)) {
+        return;
+    }
+
+    uint32_t index = handle.id - 1;
+    if (index >= renderer->shader_cap || !renderer->shaders[index].occupied) {
+        NE_LOG_WARN("attempted to destroy invalid shader handle (id=%u)", handle.id);
+        return;
+    }
+
+    ne_shader_slot_release(&renderer->shaders[index]);
+    renderer->shader_count--;
 }

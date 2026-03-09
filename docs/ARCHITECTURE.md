@@ -170,7 +170,7 @@ GPU resources (buffers, shaders, pipelines) are managed via **handle-based pools
 | Aspect | Vulkan | Metal |
 |---|---|---|
 | Swapchain model | `VkSwapchainKHR` with explicit image management | `CAMetalLayer` with automatic drawable management |
-| Frames in flight | 2 (semaphore + fence paced) | 1 (per-frame allocation — to be improved) |
+| Frames in flight | 2 (semaphore + fence paced) | 2 (`dispatch_semaphore_t` paced) |
 | Resize handling | Swapchain recreation on `VK_ERROR_OUT_OF_DATE` | Automatic via `CAMetalLayer` |
 | Vsync | `VK_PRESENT_MODE_FIFO` vs `MAILBOX` | `displaySyncEnabled` on `CAMetalLayer` |
 
