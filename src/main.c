@@ -115,11 +115,32 @@ int main(void) {
         return 1;
     }
 
-    /* ── Load shader source from disk ──────────────────────────────────── */
+    /* ── Load shaders ──────────────────────────────────────────────────── */
 
-    void *shader_source = ne_file_read("shaders/metal/basic.metal", NULL);
-    if (!shader_source) {
-        NE_LOG_ERROR("failed to load shader file");
+    /*
+     * Shader loading is platform-specific:
+     *
+     * macOS / Metal:
+     *   Load the single MSL source file and compile both stages at runtime.
+     *   Both vertex and fragment entry points live in the same .metal file,
+     *   so we read it once and create two handles from it.
+     *
+     * Windows / Vulkan:
+     *   Load pre-compiled SPIR-V blobs.  Each stage is a separate .spv file
+     *   produced by glslc during the build (see MakeFile_win32.mk).
+     *   NE_SPIRV_VERT_PATH / NE_SPIRV_FRAG_PATH are injected by the Makefile
+     *   so the paths stay in one place.
+     */
+
+    NEShaderHandle vertex_shader   = NE_SHADER_HANDLE_NULL;
+    NEShaderHandle fragment_shader = NE_SHADER_HANDLE_NULL;
+
+#if defined(_WIN32)
+
+    size_t vert_spv_size = 0;
+    void *vert_spv = ne_file_read(NE_SPIRV_VERT_PATH, &vert_spv_size);
+    if (!vert_spv) {
+        NE_LOG_ERROR("failed to load vertex SPIR-V: " NE_SPIRV_VERT_PATH);
         ne_renderer_destroy_surface(renderer, surface);
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);
@@ -127,24 +148,70 @@ int main(void) {
         return 1;
     }
 
-    NEShaderHandle vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage = NE_SHADER_STAGE_VERTEX,
-        .source = shader_source,
-        .entry_point = "vertexMain",
-        .filename = "basic.metal",
+    size_t frag_spv_size = 0;
+    void *frag_spv = ne_file_read(NE_SPIRV_FRAG_PATH, &frag_spv_size);
+    if (!frag_spv) {
+        NE_LOG_ERROR("failed to load fragment SPIR-V: " NE_SPIRV_FRAG_PATH);
+        ne_file_free(vert_spv);
+        ne_renderer_destroy_surface(renderer, surface);
+        ne_renderer_destroy(renderer);
+        ne_window_destroy(window);
+        ne_app_destroy(app);
+        return 1;
+    }
+
+    /* ne_file_read always returns the raw file size, excluding the null
+     * terminator it appends internally, so bytecode_size is the exact SPIR-V
+     * byte count as required by vkCreateShaderModule. */
+    vertex_shader = ne_shader_create(renderer, &(NEShaderDesc){
+        .stage         = NE_SHADER_STAGE_VERTEX,
+        .bytecode      = vert_spv,
+        .bytecode_size = vert_spv_size,
+        .entry_point   = "main",
     });
 
-    NEShaderHandle fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage = NE_SHADER_STAGE_FRAGMENT,
-        .source = shader_source,
+    fragment_shader = ne_shader_create(renderer, &(NEShaderDesc){
+        .stage         = NE_SHADER_STAGE_FRAGMENT,
+        .bytecode      = frag_spv,
+        .bytecode_size = frag_spv_size,
+        .entry_point   = "main",
+    });
+
+    ne_file_free(vert_spv);
+    ne_file_free(frag_spv);
+
+#else /* macOS / Metal */
+
+    void *shader_source = ne_file_read("shaders/metal/basic.metal", NULL);
+    if (!shader_source) {
+        NE_LOG_ERROR("failed to load shader source: shaders/metal/basic.metal");
+        ne_renderer_destroy_surface(renderer, surface);
+        ne_renderer_destroy(renderer);
+        ne_window_destroy(window);
+        ne_app_destroy(app);
+        return 1;
+    }
+
+    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage       = NE_SHADER_STAGE_VERTEX,
+        .source      = shader_source,
+        .entry_point = "vertexMain",
+        .filename    = "basic.metal",
+    });
+
+    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage       = NE_SHADER_STAGE_FRAGMENT,
+        .source      = shader_source,
         .entry_point = "fragmentMain",
-        .filename = "basic.metal",
+        .filename    = "basic.metal",
     });
 
     ne_file_free(shader_source);
 
+#endif /* _WIN32 */
+
     if (!ne_shader_handle_valid(vertex_shader) || !ne_shader_handle_valid(fragment_shader)) {
-        NE_LOG_ERROR("failed to compile shaders");
+        NE_LOG_ERROR("failed to create shaders");
         ne_renderer_destroy_surface(renderer, surface);
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);

@@ -1975,3 +1975,127 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         renderer->buffer_count--;
     }
 }
+
+/* ========================================================================
+ * Shader Management
+ * ======================================================================== */
+
+/*
+ * SHADER ARCHITECTURE
+ *
+ * Each VkShaderModule wraps a single SPIR-V blob.  After creation the module
+ * is opaque — the entry point name and stage are NOT stored inside it.  We
+ * strdup the entry point here so that pipeline creation can read both back
+ * from the slot without requiring the caller to keep the original descriptor
+ * alive.
+ *
+ * SPIR-V alignment contract
+ * ─────────────────────────
+ * vkCreateShaderModule requires:
+ *   - pCode  : pointer to uint32_t-aligned memory
+ *   - codeSize : a multiple of 4 bytes
+ * We validate the size.  The pointer cast from (const void *) to
+ * (const uint32_t *) is safe because ne_file_read() (malloc) guarantees at
+ * least sizeof(void *) alignment, which is ≥ 4 on all supported platforms
+ * (x86-64 Windows).
+ *
+ * Runtime source compilation
+ * ──────────────────────────
+ * The API header documents a future Slang → SPIR-V path.  Until Slang is
+ * integrated, ne_shader_create_from_source() is an explicit no-op stub: it
+ * logs a clear actionable warning and returns NE_SHADER_HANDLE_NULL.  This
+ * mirrors the Metal backend's compute pipeline stubs exactly, making the
+ * future integration point obvious.
+ */
+
+NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) {
+    if (!renderer || !desc || !desc->bytecode || desc->bytecode_size == 0 || !desc->entry_point) {
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    if (desc->bytecode_size % 4 != 0) {
+        NE_LOG_ERROR("ne_shader_create: SPIR-V bytecode size (%zu) must be a multiple of 4",
+                     desc->bytecode_size);
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    VkShaderModuleCreateInfo smci;
+    memset(&smci, 0, sizeof(smci));
+    smci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+    smci.codeSize = desc->bytecode_size;
+    /* Cast is safe — see alignment note above. */
+    smci.pCode    = (const uint32_t *)desc->bytecode;
+
+    VkShaderModule module = VK_NULL_HANDLE;
+    const VkResult vr = renderer->fns.vkCreateShaderModule(renderer->device, &smci, NULL, &module);
+    if (vr != VK_SUCCESS || module == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateShaderModule failed (vr=%d)", (int)vr);
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    const uint32_t slot_index = ne_pool_alloc(
+        (void **)&renderer->shaders,
+        &renderer->shader_count,
+        &renderer->shader_cap,
+        sizeof(NEVulkanShaderSlot)
+    );
+
+    if (slot_index == UINT32_MAX) {
+        NE_LOG_ERROR("ne_shader_create: shader pool allocation failed");
+        renderer->fns.vkDestroyShaderModule(renderer->device, module, NULL);
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    NEVulkanShaderSlot *slot = &renderer->shaders[slot_index];
+    slot->occupied    = true;
+    slot->stage       = (uint32_t)desc->stage;
+    slot->module      = module;
+    slot->entry_point = strdup(desc->entry_point);
+
+    if (!slot->entry_point) {
+        NE_LOG_ERROR("ne_shader_create: out of memory copying entry point name");
+        renderer->fns.vkDestroyShaderModule(renderer->device, module, NULL);
+        slot->occupied = false;
+        slot->module   = VK_NULL_HANDLE;
+        return NE_SHADER_HANDLE_NULL;
+    }
+
+    return (NEShaderHandle){ .id = slot_index + 1 };
+}
+
+NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc) {
+    (void)renderer;
+    (void)desc;
+    NE_LOG_WARN("ne_shader_create_from_source: runtime source compilation is not supported on "
+                "the Vulkan backend. Use ne_shader_create() with pre-compiled SPIR-V instead.");
+    return NE_SHADER_HANDLE_NULL;
+}
+
+void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
+    if (!renderer || !ne_shader_handle_valid(handle)) {
+        return;
+    }
+
+    const uint32_t index = handle.id - 1;
+    if (index >= renderer->shader_cap || !renderer->shaders[index].occupied) {
+        NE_LOG_WARN("ne_shader_destroy: invalid or already-destroyed shader handle (id=%u)",
+                    handle.id);
+        return;
+    }
+
+    NEVulkanShaderSlot *slot = &renderer->shaders[index];
+
+    if (slot->module != VK_NULL_HANDLE && renderer->fns.vkDestroyShaderModule) {
+        renderer->fns.vkDestroyShaderModule(renderer->device, slot->module, NULL);
+        slot->module = VK_NULL_HANDLE;
+    }
+
+    free(slot->entry_point);
+    slot->entry_point = NULL;
+    slot->stage       = 0;
+    slot->occupied    = false;
+
+    if (renderer->shader_count > 0) {
+        renderer->shader_count--;
+    }
+}
