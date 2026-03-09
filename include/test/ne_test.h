@@ -6,7 +6,7 @@
 
 #include "test/ne_test_buffer.h"
 
-inline void TEST_ALL_IF_TESTING_ENABLED() {
+[[maybe_unused]] static void TEST_ALL_IF_TESTING_ENABLED() {
     //init
     NEApp *app = ne_app_create();
     if (!app) {
@@ -46,6 +46,7 @@ inline void TEST_ALL_IF_TESTING_ENABLED() {
 
 #else /* TESTING_ENABLED */
 
-inline void TEST_ALL_IF_TESTING_ENABLED() {}
+[[maybe_unused]] static void TEST_ALL_IF_TESTING_ENABLED() {
+}
 
 #endif /* TESTING_ENABLED */
