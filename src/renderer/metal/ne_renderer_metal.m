@@ -7,6 +7,9 @@
 #include "ne_app.h"
 #include "ne_log.h"
 #include "ne_renderer.h"
+#include "ne_renderer_buffer.h"
+#include "ne_renderer_pass.h"
+#include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
 
@@ -15,11 +18,11 @@
 #include <string.h>
 
 enum {
-    NE_MTL_MAX_FRAMES_IN_FLIGHT = 2,
-    NE_MTL_SHADER_POOL_INITIAL_CAP = 16,
+    NE_MTL_MAX_FRAMES_IN_FLIGHT    = 2,
+    NE_MTL_POOL_INITIAL_CAP        = 16,
 };
 
-/* ── Shader pool ────────────────────────────────────────────────────────── */
+/* ── Resource pool slot types ───────────────────────────────────────────── */
 
 typedef struct NEShaderSlot {
     bool occupied;
@@ -28,6 +31,19 @@ typedef struct NEShaderSlot {
     void *function;    /* id<MTLFunction> */
     char *entry_point; /* strdup'd copy   */
 } NEShaderSlot;
+
+typedef struct NEBufferSlot {
+    bool occupied;
+    uint32_t usage;
+    uint32_t size;
+    void *buffer;      /* id<MTLBuffer>   */
+} NEBufferSlot;
+
+typedef struct NEPipelineSlot {
+    bool occupied;
+    void *pipeline_state;  /* id<MTLRenderPipelineState> */
+    uint32_t topology;     /* MTLPrimitiveType value     */
+} NEPipelineSlot;
 
 /* ── Renderer ───────────────────────────────────────────────────────────── */
 
@@ -38,20 +54,34 @@ struct NERenderer {
     NEShaderSlot *shaders;
     uint32_t shader_count;
     uint32_t shader_cap;
+
+    NEBufferSlot *buffers;
+    uint32_t buffer_count;
+    uint32_t buffer_cap;
+
+    NEPipelineSlot *pipelines;
+    uint32_t pipeline_count;
+    uint32_t pipeline_cap;
 };
 
 struct NERenderSurface {
     NERenderer *renderer;
     NEWindow *window;
 
-    void *layer; /* CAMetalLayer* */
-    void *drawable; /* id<CAMetalDrawable> */
-    void *command_buffer; /* id<MTLCommandBuffer> */
+    void *layer;          /* CAMetalLayer*              */
+    void *drawable;       /* id<CAMetalDrawable>        */
+    void *command_buffer; /* id<MTLCommandBuffer>       */
+    void *encoder;        /* id<MTLRenderCommandEncoder> — active during frame */
 
     float clear_color[4];
 
     /* Frame pacing: limits how far the CPU can get ahead of the GPU. */
     dispatch_semaphore_t frame_semaphore;
+
+    /* Per-pass draw state (valid between begin_frame / end_frame). */
+    uint32_t current_topology;        /* MTLPrimitiveType              */
+    void    *current_index_buffer;    /* id<MTLBuffer> — borrowed, not retained */
+    uint32_t current_index_type;      /* MTLIndexType                  */
 };
 
 /**
@@ -81,31 +111,33 @@ static id<MTLCommandBuffer> ne_surface_get_command_buffer(const NERenderSurface 
     return surface && surface->command_buffer ? (__bridge id<MTLCommandBuffer>)surface->command_buffer : nil;
 }
 
+/* ── Generic pool alloc helper ──────────────────────────────────────────── */
+
 /**
- * Finds an available slot in the shader pool, growing it if necessary.
- * Returns the slot index, or UINT32_MAX on allocation failure.
+ * Finds a free slot in a pool or grows it.  Works for any slot type whose first
+ * field is `bool occupied`.  Returns the slot index, or UINT32_MAX on failure.
  */
-static uint32_t ne_shader_pool_alloc(NERenderer *renderer) {
-    /* Scan for a free slot. */
-    for (uint32_t i = 0; i < renderer->shader_cap; i++) {
-        if (!renderer->shaders[i].occupied) {
+static uint32_t ne_pool_alloc(void **pool_ptr, uint32_t *cap_ptr, size_t slot_size) {
+    uint8_t *pool = (uint8_t *)*pool_ptr;
+    uint32_t cap = *cap_ptr;
+
+    for (uint32_t i = 0; i < cap; i++) {
+        bool *occupied = (bool *)(pool + i * slot_size);
+        if (!*occupied) {
             return i;
         }
     }
 
-    /* Grow the pool. */
-    uint32_t new_cap = renderer->shader_cap == 0
-                           ? NE_MTL_SHADER_POOL_INITIAL_CAP
-                           : renderer->shader_cap * 2;
-    NEShaderSlot *new_slots = (NEShaderSlot *)realloc(renderer->shaders, new_cap * sizeof(NEShaderSlot));
-    if (!new_slots) {
+    uint32_t new_cap = cap == 0 ? NE_MTL_POOL_INITIAL_CAP : cap * 2;
+    void *new_pool = realloc(*pool_ptr, new_cap * slot_size);
+    if (!new_pool) {
         return UINT32_MAX;
     }
-    memset(new_slots + renderer->shader_cap, 0, (new_cap - renderer->shader_cap) * sizeof(NEShaderSlot));
+    memset((uint8_t *)new_pool + cap * slot_size, 0, (new_cap - cap) * slot_size);
 
-    uint32_t index = renderer->shader_cap;
-    renderer->shaders = new_slots;
-    renderer->shader_cap = new_cap;
+    uint32_t index = cap;
+    *pool_ptr = new_pool;
+    *cap_ptr = new_cap;
     return index;
 }
 
@@ -121,6 +153,22 @@ static void ne_shader_slot_release(NEShaderSlot *slot) {
     free(slot->entry_point);
     slot->entry_point = NULL;
     slot->occupied = false;
+}
+
+/* ── Pool-aware lookup helpers ──────────────────────────────────────────── */
+
+static id<MTLFunction> ne_shader_get_function(const NERenderer *renderer, NEShaderHandle handle) {
+    if (!ne_shader_handle_valid(handle)) return nil;
+    uint32_t index = handle.id - 1;
+    if (index >= renderer->shader_cap || !renderer->shaders[index].occupied) return nil;
+    return (__bridge id<MTLFunction>)renderer->shaders[index].function;
+}
+
+static id<MTLBuffer> ne_buffer_get(const NERenderer *renderer, NEBufferHandle handle) {
+    if (!ne_buffer_handle_valid(handle)) return nil;
+    uint32_t index = handle.id - 1;
+    if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) return nil;
+    return (__bridge id<MTLBuffer>)renderer->buffers[index].buffer;
 }
 
 static id<MTLDevice> ne_renderer_get_device(const NERenderer *renderer) {
@@ -180,6 +228,28 @@ void ne_renderer_destroy(NERenderer *renderer) {
     renderer->shaders = NULL;
     renderer->shader_count = 0;
     renderer->shader_cap = 0;
+
+    /* Release all live buffers. */
+    for (uint32_t i = 0; i < renderer->buffer_cap; i++) {
+        if (renderer->buffers[i].occupied && renderer->buffers[i].buffer) {
+            (void)CFBridgingRelease(renderer->buffers[i].buffer);
+        }
+    }
+    free(renderer->buffers);
+    renderer->buffers = NULL;
+    renderer->buffer_count = 0;
+    renderer->buffer_cap = 0;
+
+    /* Release all live pipelines. */
+    for (uint32_t i = 0; i < renderer->pipeline_cap; i++) {
+        if (renderer->pipelines[i].occupied && renderer->pipelines[i].pipeline_state) {
+            (void)CFBridgingRelease(renderer->pipelines[i].pipeline_state);
+        }
+    }
+    free(renderer->pipelines);
+    renderer->pipelines = NULL;
+    renderer->pipeline_count = 0;
+    renderer->pipeline_cap = 0;
 
     if (renderer->queue) {
         (void)CFBridgingRelease(renderer->queue);
@@ -283,6 +353,10 @@ void ne_renderer_destroy_surface(NERenderer *renderer, NERenderSurface *surface)
         }
     }
 
+    if (surface->encoder) {
+        (void)CFBridgingRelease(surface->encoder);
+        surface->encoder = NULL;
+    }
     if (surface->command_buffer) {
         (void)CFBridgingRelease(surface->command_buffer);
         surface->command_buffer = NULL;
@@ -365,18 +439,33 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
         return NULL;
     }
 
-    MTLRenderPassDescriptor *pass = [MTLRenderPassDescriptor renderPassDescriptor];
-    pass.colorAttachments[0].texture = drawable.texture;
-    pass.colorAttachments[0].loadAction = MTLLoadActionClear;
-    pass.colorAttachments[0].storeAction = MTLStoreActionStore;
-    pass.colorAttachments[0].clearColor = MTLClearColorMake(surface->clear_color[0], surface->clear_color[1], surface->clear_color[2],
+    MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+    rpd.colorAttachments[0].texture = drawable.texture;
+    rpd.colorAttachments[0].loadAction = MTLLoadActionClear;
+    rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rpd.colorAttachments[0].clearColor = MTLClearColorMake(surface->clear_color[0], surface->clear_color[1], surface->clear_color[2],
                                                            surface->clear_color[3]);
 
-    id<MTLRenderCommandEncoder> enc = [command_buffer renderCommandEncoderWithDescriptor:pass];
-    [enc endEncoding];
+    id<MTLRenderCommandEncoder> enc = [command_buffer renderCommandEncoderWithDescriptor:rpd];
+    if (!enc) {
+        return NULL;
+    }
+
+    /* Set a default viewport matching the framebuffer. */
+    MTLViewport vp = { 0.0, 0.0, (double)fb_w, (double)fb_h, 0.0, 1.0 };
+    [enc setViewport:vp];
+
+    MTLScissorRect scissor = { 0, 0, (NSUInteger)fb_w, (NSUInteger)fb_h };
+    [enc setScissorRect:scissor];
 
     surface->drawable = (__bridge_retained void *)drawable;
     surface->command_buffer = (__bridge_retained void *)command_buffer;
+    surface->encoder = (__bridge_retained void *)enc;
+
+    /* Reset per-pass draw state. */
+    surface->current_topology = MTLPrimitiveTypeTriangle;
+    surface->current_index_buffer = NULL;
+    surface->current_index_type = MTLIndexTypeUInt16;
 
     g_active_pass.surface = surface;
     return &g_active_pass;
@@ -396,6 +485,14 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
     id<MTLCommandBuffer> command_buffer = ne_surface_get_command_buffer(surface);
     if (!drawable || !command_buffer) {
         return;
+    }
+
+    /* End the render command encoder that was left open by begin_frame. */
+    if (surface->encoder) {
+        id<MTLRenderCommandEncoder> enc = (__bridge id<MTLRenderCommandEncoder>)surface->encoder;
+        [enc endEncoding];
+        (void)CFBridgingRelease(surface->encoder);
+        surface->encoder = NULL;
     }
 
     /* Signal the frame semaphore when the GPU finishes this command buffer. */
@@ -432,7 +529,7 @@ static NEShaderHandle ne_shader_finish_create(NERenderer *renderer, NEShaderStag
         return NE_SHADER_HANDLE_NULL;
     }
 
-    uint32_t index = ne_shader_pool_alloc(renderer);
+    uint32_t index = ne_pool_alloc((void **)&renderer->shaders, &renderer->shader_cap, sizeof(NEShaderSlot));
     if (index == UINT32_MAX) {
         NE_LOG_ERROR("shader pool allocation failed");
         return NE_SHADER_HANDLE_NULL;
@@ -530,4 +627,374 @@ void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
 
     ne_shader_slot_release(&renderer->shaders[index]);
     renderer->shader_count--;
+}
+
+/* ── Buffers ────────────────────────────────────────────────────────────── */
+
+NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) {
+    if (!renderer || !desc || desc->size == 0) {
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    id<MTLDevice> device = ne_renderer_get_device(renderer);
+    if (!device) {
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    id<MTLBuffer> buffer = nil;
+    if (desc->initial_data) {
+        buffer = [device newBufferWithBytes:desc->initial_data
+                                    length:desc->size
+                                   options:MTLResourceStorageModeShared];
+    } else {
+        buffer = [device newBufferWithLength:desc->size
+                                    options:MTLResourceStorageModeShared];
+    }
+
+    if (!buffer) {
+        NE_LOG_ERROR("failed to create Metal buffer (%u bytes)", desc->size);
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    uint32_t index = ne_pool_alloc((void **)&renderer->buffers, &renderer->buffer_cap, sizeof(NEBufferSlot));
+    if (index == UINT32_MAX) {
+        NE_LOG_ERROR("buffer pool allocation failed");
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    NEBufferSlot *slot = &renderer->buffers[index];
+    slot->occupied = true;
+    slot->usage = desc->usage;
+    slot->size = desc->size;
+    slot->buffer = (__bridge_retained void *)buffer;
+    renderer->buffer_count++;
+
+    return (NEBufferHandle){ .id = index + 1 };
+}
+
+void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
+                      const void *data, uint32_t size, uint32_t offset) {
+    if (!renderer || !ne_buffer_handle_valid(handle) || !data || size == 0) {
+        return;
+    }
+
+    uint32_t index = handle.id - 1;
+    if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) {
+        NE_LOG_WARN("attempted to update invalid buffer handle (id=%u)", handle.id);
+        return;
+    }
+
+    NEBufferSlot *slot = &renderer->buffers[index];
+    if (offset + size > slot->size) {
+        NE_LOG_ERROR("buffer update out of bounds (offset=%u + size=%u > buffer_size=%u)",
+                     offset, size, slot->size);
+        return;
+    }
+
+    id<MTLBuffer> buffer = (__bridge id<MTLBuffer>)slot->buffer;
+    memcpy((uint8_t *)[buffer contents] + offset, data, size);
+}
+
+void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
+    if (!renderer || !ne_buffer_handle_valid(handle)) {
+        return;
+    }
+
+    uint32_t index = handle.id - 1;
+    if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) {
+        NE_LOG_WARN("attempted to destroy invalid buffer handle (id=%u)", handle.id);
+        return;
+    }
+
+    NEBufferSlot *slot = &renderer->buffers[index];
+    if (slot->buffer) {
+        (void)CFBridgingRelease(slot->buffer);
+        slot->buffer = NULL;
+    }
+    slot->occupied = false;
+    renderer->buffer_count--;
+}
+
+/* ── Pipelines ──────────────────────────────────────────────────────────── */
+
+static MTLVertexFormat ne_vertex_format_to_mtl(NEVertexFormat fmt) {
+    switch (fmt) {
+    case NE_VERTEX_FORMAT_FLOAT:    return MTLVertexFormatFloat;
+    case NE_VERTEX_FORMAT_FLOAT2:   return MTLVertexFormatFloat2;
+    case NE_VERTEX_FORMAT_FLOAT3:   return MTLVertexFormatFloat3;
+    case NE_VERTEX_FORMAT_FLOAT4:   return MTLVertexFormatFloat4;
+    case NE_VERTEX_FORMAT_UNORM8X4: return MTLVertexFormatUChar4Normalized;
+    default:                        return MTLVertexFormatFloat4;
+    }
+}
+
+static MTLPrimitiveType ne_topology_to_mtl(NEPrimitiveTopology t) {
+    switch (t) {
+    case NE_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST:  return MTLPrimitiveTypeTriangle;
+    case NE_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP: return MTLPrimitiveTypeTriangleStrip;
+    case NE_PRIMITIVE_TOPOLOGY_LINE_LIST:      return MTLPrimitiveTypeLine;
+    case NE_PRIMITIVE_TOPOLOGY_LINE_STRIP:     return MTLPrimitiveTypeLineStrip;
+    case NE_PRIMITIVE_TOPOLOGY_POINT_LIST:     return MTLPrimitiveTypePoint;
+    default:                                   return MTLPrimitiveTypeTriangle;
+    }
+}
+
+static MTLBlendFactor ne_blend_factor_to_mtl(NEBlendFactor f) {
+    switch (f) {
+    case NE_BLEND_FACTOR_ZERO:                return MTLBlendFactorZero;
+    case NE_BLEND_FACTOR_ONE:                 return MTLBlendFactorOne;
+    case NE_BLEND_FACTOR_SRC_ALPHA:           return MTLBlendFactorSourceAlpha;
+    case NE_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA: return MTLBlendFactorOneMinusSourceAlpha;
+    case NE_BLEND_FACTOR_DST_ALPHA:           return MTLBlendFactorDestinationAlpha;
+    case NE_BLEND_FACTOR_ONE_MINUS_DST_ALPHA: return MTLBlendFactorOneMinusDestinationAlpha;
+    default:                                  return MTLBlendFactorOne;
+    }
+}
+
+static MTLBlendOperation ne_blend_op_to_mtl(NEBlendOp op) {
+    switch (op) {
+    case NE_BLEND_OP_ADD:              return MTLBlendOperationAdd;
+    case NE_BLEND_OP_SUBTRACT:         return MTLBlendOperationSubtract;
+    case NE_BLEND_OP_REVERSE_SUBTRACT: return MTLBlendOperationReverseSubtract;
+    case NE_BLEND_OP_MIN:              return MTLBlendOperationMin;
+    case NE_BLEND_OP_MAX:              return MTLBlendOperationMax;
+    default:                           return MTLBlendOperationAdd;
+    }
+}
+
+NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *desc) {
+    if (!renderer || !desc) {
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    id<MTLFunction> vertex_fn   = ne_shader_get_function(renderer, desc->vertex_shader);
+    id<MTLFunction> fragment_fn = ne_shader_get_function(renderer, desc->fragment_shader);
+    if (!vertex_fn || !fragment_fn) {
+        NE_LOG_ERROR("pipeline creation failed: invalid vertex or fragment shader");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    MTLRenderPipelineDescriptor *pd = [[MTLRenderPipelineDescriptor alloc] init];
+    pd.vertexFunction = vertex_fn;
+    pd.fragmentFunction = fragment_fn;
+    pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+    /* Blend state. */
+    if (desc->blend.enabled) {
+        pd.colorAttachments[0].blendingEnabled = YES;
+        pd.colorAttachments[0].sourceRGBBlendFactor        = ne_blend_factor_to_mtl(desc->blend.src_color);
+        pd.colorAttachments[0].destinationRGBBlendFactor    = ne_blend_factor_to_mtl(desc->blend.dst_color);
+        pd.colorAttachments[0].rgbBlendOperation            = ne_blend_op_to_mtl(desc->blend.color_op);
+        pd.colorAttachments[0].sourceAlphaBlendFactor       = ne_blend_factor_to_mtl(desc->blend.src_alpha);
+        pd.colorAttachments[0].destinationAlphaBlendFactor  = ne_blend_factor_to_mtl(desc->blend.dst_alpha);
+        pd.colorAttachments[0].alphaBlendOperation          = ne_blend_op_to_mtl(desc->blend.alpha_op);
+    }
+
+    /* Vertex descriptor from NEVertexBufferLayout(s). */
+    if (desc->vertex_layouts && desc->vertex_layout_count > 0) {
+        MTLVertexDescriptor *vd = [[MTLVertexDescriptor alloc] init];
+
+        for (uint32_t buf = 0; buf < desc->vertex_layout_count; buf++) {
+            const NEVertexBufferLayout *layout = &desc->vertex_layouts[buf];
+            vd.layouts[buf].stride = layout->stride;
+            vd.layouts[buf].stepFunction = MTLVertexStepFunctionPerVertex;
+
+            for (uint32_t a = 0; a < layout->attribute_count; a++) {
+                const NEVertexAttribute *attr = &layout->attributes[a];
+                vd.attributes[attr->location].format      = ne_vertex_format_to_mtl(attr->format);
+                vd.attributes[attr->location].offset      = attr->offset;
+                vd.attributes[attr->location].bufferIndex = buf;
+            }
+        }
+
+        pd.vertexDescriptor = vd;
+    }
+
+    id<MTLDevice> device = ne_renderer_get_device(renderer);
+    NSError *error = nil;
+    id<MTLRenderPipelineState> pso = [device newRenderPipelineStateWithDescriptor:pd error:&error];
+    if (!pso) {
+        NE_LOG_ERROR("failed to create Metal pipeline state: %s",
+                     error ? [[error localizedDescription] UTF8String] : "unknown error");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    uint32_t index = ne_pool_alloc((void **)&renderer->pipelines, &renderer->pipeline_cap, sizeof(NEPipelineSlot));
+    if (index == UINT32_MAX) {
+        NE_LOG_ERROR("pipeline pool allocation failed");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    NEPipelineSlot *slot = &renderer->pipelines[index];
+    slot->occupied = true;
+    slot->pipeline_state = (__bridge_retained void *)pso;
+    slot->topology = (uint32_t)ne_topology_to_mtl(desc->topology);
+    renderer->pipeline_count++;
+
+    return (NEPipelineHandle){ .id = index + 1 };
+}
+
+void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
+    if (!renderer || !ne_pipeline_handle_valid(handle)) {
+        return;
+    }
+
+    uint32_t index = handle.id - 1;
+    if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
+        NE_LOG_WARN("attempted to destroy invalid pipeline handle (id=%u)", handle.id);
+        return;
+    }
+
+    NEPipelineSlot *slot = &renderer->pipelines[index];
+    if (slot->pipeline_state) {
+        (void)CFBridgingRelease(slot->pipeline_state);
+        slot->pipeline_state = NULL;
+    }
+    slot->occupied = false;
+    renderer->pipeline_count--;
+}
+
+NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer, const NEComputePipelineDesc *desc) {
+    (void)renderer; (void)desc;
+    NE_LOG_WARN("compute pipelines not yet implemented on Metal");
+    return NE_COMPUTE_PIPELINE_HANDLE_NULL;
+}
+
+void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle handle) {
+    (void)renderer; (void)handle;
+}
+
+/* ── Render pass commands ───────────────────────────────────────────────── */
+
+static id<MTLRenderCommandEncoder> ne_pass_get_encoder(NERenderPass *pass) {
+    if (!pass || !pass->surface || !pass->surface->encoder) return nil;
+    return (__bridge id<MTLRenderCommandEncoder>)pass->surface->encoder;
+}
+
+void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) {
+    id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
+    if (!enc) return;
+
+    NERenderer *renderer = pass->surface->renderer;
+    uint32_t index = pipeline.id - 1;
+    if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
+        NE_LOG_WARN("set_pipeline: invalid pipeline handle (id=%u)", pipeline.id);
+        return;
+    }
+
+    NEPipelineSlot *slot = &renderer->pipelines[index];
+    id<MTLRenderPipelineState> pso = (__bridge id<MTLRenderPipelineState>)slot->pipeline_state;
+    [enc setRenderPipelineState:pso];
+    pass->surface->current_topology = slot->topology;
+}
+
+void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot, NEBufferHandle buffer) {
+    id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
+    if (!enc) return;
+
+    id<MTLBuffer> mtl_buf = ne_buffer_get(pass->surface->renderer, buffer);
+    if (!mtl_buf) {
+        NE_LOG_WARN("set_vertex_buffer: invalid buffer handle (id=%u)", buffer.id);
+        return;
+    }
+
+    [enc setVertexBuffer:mtl_buf offset:0 atIndex:slot];
+}
+
+void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer, NEIndexType type) {
+    if (!pass || !pass->surface) return;
+
+    id<MTLBuffer> mtl_buf = ne_buffer_get(pass->surface->renderer, buffer);
+    if (!mtl_buf) {
+        NE_LOG_WARN("set_index_buffer: invalid buffer handle (id=%u)", buffer.id);
+        return;
+    }
+
+    /* Store for use at draw_indexed time. Borrowed pointer — not retained. */
+    pass->surface->current_index_buffer = (__bridge void *)mtl_buf;
+    pass->surface->current_index_type = (type == NE_INDEX_TYPE_UINT32)
+                                            ? (uint32_t)MTLIndexTypeUInt32
+                                            : (uint32_t)MTLIndexTypeUInt16;
+}
+
+void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
+                                     uint32_t slot, const void *data, uint32_t size) {
+    id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
+    if (!enc || !data || size == 0) return;
+
+    switch (stage) {
+    case NE_SHADER_STAGE_VERTEX:
+        [enc setVertexBytes:data length:size atIndex:slot];
+        break;
+    case NE_SHADER_STAGE_FRAGMENT:
+        [enc setFragmentBytes:data length:size atIndex:slot];
+        break;
+    default:
+        NE_LOG_WARN("set_uniform_data: unsupported stage for render pass");
+        break;
+    }
+}
+
+void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex, uint32_t vertex_count) {
+    id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
+    if (!enc) return;
+
+    [enc drawPrimitives:(MTLPrimitiveType)pass->surface->current_topology
+            vertexStart:first_vertex
+            vertexCount:vertex_count];
+}
+
+void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count,
+                                 uint32_t first_index, int32_t vertex_offset) {
+    id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
+    if (!enc) return;
+
+    NERenderSurface *surface = pass->surface;
+    if (!surface->current_index_buffer) {
+        NE_LOG_WARN("draw_indexed called without a bound index buffer");
+        return;
+    }
+
+    id<MTLBuffer> idx_buf = (__bridge id<MTLBuffer>)surface->current_index_buffer;
+    MTLIndexType idx_type = (MTLIndexType)surface->current_index_type;
+    NSUInteger idx_size = (idx_type == MTLIndexTypeUInt32) ? 4 : 2;
+
+    [enc drawIndexedPrimitives:(MTLPrimitiveType)surface->current_topology
+                    indexCount:index_count
+                     indexType:idx_type
+                   indexBuffer:idx_buf
+             indexBufferOffset:first_index * idx_size
+                 instanceCount:1
+                    baseVertex:vertex_offset
+                  baseInstance:0];
+}
+
+/* ── Compute pass stubs ─────────────────────────────────────────────────── */
+
+NEComputePass *ne_render_pass_begin_compute(NERenderPass *pass) {
+    (void)pass;
+    NE_LOG_WARN("compute passes not yet implemented on Metal");
+    return NULL;
+}
+
+void ne_render_pass_end_compute(NERenderPass *pass, NEComputePass *compute) {
+    (void)pass; (void)compute;
+}
+
+void ne_compute_pass_set_pipeline(NEComputePass *pass, NEComputePipelineHandle pipeline) {
+    (void)pass; (void)pipeline;
+}
+
+void ne_compute_pass_set_storage_buffer(NEComputePass *pass, uint32_t slot, NEBufferHandle buffer) {
+    (void)pass; (void)slot; (void)buffer;
+}
+
+void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint32_t slot,
+                                      const void *data, uint32_t size) {
+    (void)pass; (void)slot; (void)data; (void)size;
+}
+
+void ne_compute_pass_dispatch(NEComputePass *pass, uint32_t group_count_x,
+                              uint32_t group_count_y, uint32_t group_count_z) {
+    (void)pass; (void)group_count_x; (void)group_count_y; (void)group_count_z;
 }
