@@ -85,11 +85,34 @@ typedef struct NEVulkanFns {
     PFN_vkEndCommandBuffer vkEndCommandBuffer;
     PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
     PFN_vkCmdClearColorImage vkCmdClearColorImage;
+
+    /* Buffer management */
+    PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+    PFN_vkCreateBuffer vkCreateBuffer;
+    PFN_vkDestroyBuffer vkDestroyBuffer;
+    PFN_vkAllocateMemory vkAllocateMemory;
+    PFN_vkFreeMemory vkFreeMemory;
+    PFN_vkBindBufferMemory vkBindBufferMemory;
+    PFN_vkMapMemory vkMapMemory;
+    PFN_vkUnmapMemory vkUnmapMemory;
+    PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
+    PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
 } NEVulkanFunctions;
 
 enum {
     NE_VK_MAX_FRAMES_IN_FLIGHT = 2,
+    NE_VK_POOL_INITIAL_CAP = 16,
 };
+
+/* ── Buffer resource pool ───────────────────────────────────────────────── */
+
+typedef struct NEVulkanBufferSlot {
+    bool occupied;
+    uint32_t usage;
+    uint32_t size;
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+} NEVulkanBufferSlot;
 
 typedef struct NESwapchain {
     VkSwapchainKHR swapchain;
@@ -133,6 +156,44 @@ struct NERenderer {
     uint32_t queue_family_index;
 
     NEVulkanFunctions fns;
+
+    /* Buffer resource pool */
+    NEVulkanBufferSlot *buffers;
+    uint32_t buffer_count;
+    uint32_t buffer_cap;
+
+    /* Staging buffer for data uploads */
+    VkBuffer staging_buffer;
+    VkDeviceMemory staging_memory;
+    void *staging_mapped;
+    uint32_t staging_size;
+
+    /* Transfer command pool for staging uploads */
+    VkCommandPool transfer_cmd_pool;
+    VkCommandBuffer transfer_cmd;
+
+    /* ─── Descriptor Set Infrastructure (foundation for future GPU binding) ─── */
+    /* 
+     * Descriptor sets enable binding SSBOs, UBOs, and samplers to pipelines.
+     * This infrastructure is prepared for future implementation.
+     *
+     * Design:
+     * - Descriptor pool: centralized allocation point for descriptor sets
+     * - Descriptor set layout cache: avoids redundant layout creation
+     * - Binding structure: associates buffers/images with pipeline resources
+     *
+     * Current strategy: use push constants for uniforms (simpler, ~128-256 byte limit)
+     * Future: migrate to descriptor set-based binding for flexible resource management
+     *
+     * Integration points:
+     * - ne_pipeline_create(): will accept descriptor set layout requirements
+     * - ne_render_pass_bind_buffer(): future function to bind SSBOs to pipelines
+     * - Pipeline layout creation: will include descriptor set layouts
+     */
+    /* VkDescriptorPool descriptor_pool;        /* Placeholder: not yet created */ */
+    /* uint32_t descriptor_pool_size;           /* Placeholder: pool capacity */ */
+    /* VkDescriptorSetLayout *layout_cache;    /* Placeholder: reuse layouts */ */
+    /* uint32_t layout_cache_count;            /* Placeholder: active layouts */ */
 
     struct NERenderSurface *surfaces;
 };
@@ -353,6 +414,7 @@ static bool ne_vk_load_instance_fns(NERenderer *r) {
     f->vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceProperties");
     f->vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
     f->vkCreateDevice = (PFN_vkCreateDevice)ne_vk_get_instance(f, r->instance, "vkCreateDevice");
+    f->vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceMemoryProperties");
 
     f->vkCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)ne_vk_get_instance(f, r->instance, "vkCreateWin32SurfaceKHR");
     f->vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)ne_vk_get_instance(f, r->instance, "vkDestroySurfaceKHR");
@@ -364,7 +426,8 @@ static bool ne_vk_load_instance_fns(NERenderer *r) {
 
     return f->vkDestroyInstance && f->vkEnumeratePhysicalDevices && f->vkGetPhysicalDeviceQueueFamilyProperties && f->vkCreateDevice &&
            f->vkCreateWin32SurfaceKHR && f->vkDestroySurfaceKHR && f->vkGetPhysicalDeviceSurfaceSupportKHR &&
-           f->vkGetPhysicalDeviceSurfaceCapabilitiesKHR && f->vkGetPhysicalDeviceSurfaceFormatsKHR && f->vkGetPhysicalDeviceSurfacePresentModesKHR;
+           f->vkGetPhysicalDeviceSurfaceCapabilitiesKHR && f->vkGetPhysicalDeviceSurfaceFormatsKHR && f->vkGetPhysicalDeviceSurfacePresentModesKHR &&
+           f->vkGetPhysicalDeviceMemoryProperties;
 }
 
 static bool ne_vk_load_device_fns(NERenderer *r) {
@@ -402,10 +465,23 @@ static bool ne_vk_load_device_fns(NERenderer *r) {
     f->vkCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)ne_vk_get_device(f, r->device, "vkCmdPipelineBarrier");
     f->vkCmdClearColorImage = (PFN_vkCmdClearColorImage)ne_vk_get_device(f, r->device, "vkCmdClearColorImage");
 
+    /* Buffer management functions */
+    f->vkCreateBuffer = (PFN_vkCreateBuffer)ne_vk_get_device(f, r->device, "vkCreateBuffer");
+    f->vkDestroyBuffer = (PFN_vkDestroyBuffer)ne_vk_get_device(f, r->device, "vkDestroyBuffer");
+    f->vkAllocateMemory = (PFN_vkAllocateMemory)ne_vk_get_device(f, r->device, "vkAllocateMemory");
+    f->vkFreeMemory = (PFN_vkFreeMemory)ne_vk_get_device(f, r->device, "vkFreeMemory");
+    f->vkBindBufferMemory = (PFN_vkBindBufferMemory)ne_vk_get_device(f, r->device, "vkBindBufferMemory");
+    f->vkMapMemory = (PFN_vkMapMemory)ne_vk_get_device(f, r->device, "vkMapMemory");
+    f->vkUnmapMemory = (PFN_vkUnmapMemory)ne_vk_get_device(f, r->device, "vkUnmapMemory");
+    f->vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)ne_vk_get_device(f, r->device, "vkFlushMappedMemoryRanges");
+    f->vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)ne_vk_get_device(f, r->device, "vkCmdCopyBuffer");
+
     return f->vkDestroyDevice && f->vkGetDeviceQueue && f->vkCreateSwapchainKHR && f->vkGetSwapchainImagesKHR &&
            f->vkAcquireNextImageKHR && f->vkQueueSubmit && f->vkQueuePresentKHR && f->vkCreateSemaphore && f->vkCreateFence &&
            f->vkWaitForFences && f->vkResetFences && f->vkCreateCommandPool && f->vkResetCommandBuffer && f->vkAllocateCommandBuffers &&
-           f->vkBeginCommandBuffer && f->vkEndCommandBuffer && f->vkCmdPipelineBarrier && f->vkCmdClearColorImage;
+           f->vkBeginCommandBuffer && f->vkEndCommandBuffer && f->vkCmdPipelineBarrier && f->vkCmdClearColorImage &&
+           f->vkCreateBuffer && f->vkDestroyBuffer && f->vkAllocateMemory && f->vkFreeMemory && f->vkBindBufferMemory &&
+           f->vkMapMemory && f->vkUnmapMemory && f->vkFlushMappedMemoryRanges && f->vkCmdCopyBuffer;
 }
 
 static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
@@ -518,6 +594,37 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
         return false;
     }
 
+    /* Create a single transfer command pool for buffer staging operations.
+     * Uses TRANSIENT_BIT since these are temporary, short-lived command buffers.
+     */
+    VkCommandPoolCreateInfo pool_info;
+    memset(&pool_info, 0, sizeof(pool_info));
+    pool_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
+    pool_info.queueFamilyIndex = r->queue_family_index;
+
+    vr = r->fns.vkCreateCommandPool(r->device, &pool_info, NULL, &r->transfer_cmd_pool);
+    if (vr != VK_SUCCESS || r->transfer_cmd_pool == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateCommandPool (transfer) failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    /* Allocate a single reusable command buffer from the transfer pool. */
+    VkCommandBufferAllocateInfo alloc_info;
+    memset(&alloc_info, 0, sizeof(alloc_info));
+    alloc_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    alloc_info.commandPool = r->transfer_cmd_pool;
+    alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    alloc_info.commandBufferCount = 1;
+
+    vr = r->fns.vkAllocateCommandBuffers(r->device, &alloc_info, &r->transfer_cmd);
+    if (vr != VK_SUCCESS || r->transfer_cmd == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkAllocateCommandBuffers (transfer) failed (vr=%d)", (int)vr);
+        r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
+        r->transfer_cmd_pool = VK_NULL_HANDLE;
+        return false;
+    }
+
     return true;
 }
 
@@ -566,6 +673,177 @@ static uint32_t ne_vk_clamp_u32(uint32_t v, uint32_t minv, uint32_t maxv) {
         return maxv;
     }
     return v;
+}
+
+/* ── Buffer helpers ────────────────────────────────────────────────────── */
+
+/**
+ * Find a suitable memory type index for the given requirements.
+ * Returns UINT32_MAX if no suitable type found.
+ */
+static uint32_t ne_vk_find_memory_type(NERenderer *r, uint32_t type_filter,
+                                        VkMemoryPropertyFlags properties) {
+    if (!r || !r->fns.vkGetPhysicalDeviceMemoryProperties) {
+        return UINT32_MAX;
+    }
+
+    VkPhysicalDeviceMemoryProperties mem_props;
+    r->fns.vkGetPhysicalDeviceMemoryProperties(r->phys, &mem_props);
+
+    for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
+        if ((type_filter & (1u << i)) &&
+            (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+            return i;
+        }
+    }
+
+    return UINT32_MAX;
+}
+
+/**
+ * Generic pool allocation helper.
+ * Works for any slot type whose first field is `bool occupied`.
+ * Returns the slot index, or UINT32_MAX on failure.
+ */
+static uint32_t ne_pool_alloc(void **pool_ptr, uint32_t *count_ptr, uint32_t *cap_ptr,
+                               size_t slot_size) {
+    uint8_t *pool = (uint8_t *)*pool_ptr;
+    uint32_t cap = *cap_ptr;
+
+    /* Search for free slot */
+    for (uint32_t i = 0; i < cap; i++) {
+        bool *occupied = (bool *)(pool + i * slot_size);
+        if (!*occupied) {
+            return i;
+        }
+    }
+
+    /* No free slot; grow pool */
+    uint32_t new_cap = cap == 0 ? NE_VK_POOL_INITIAL_CAP : cap * 2;
+    void *new_pool = realloc(*pool_ptr, new_cap * slot_size);
+    if (!new_pool) {
+        return UINT32_MAX;
+    }
+
+    /* Zero-initialize new slots */
+    memset((uint8_t *)new_pool + cap * slot_size, 0, (new_cap - cap) * slot_size);
+
+    uint32_t index = cap;
+    *pool_ptr = new_pool;
+    *cap_ptr = new_cap;
+    *count_ptr = *count_ptr + 1;
+
+    return index;
+}
+
+/**
+ * Ensure the staging buffer exists with at least the requested size.
+ * Creates or resizes the staging buffer as needed.
+ * Returns true on success, false on failure.
+ *
+ * The staging buffer is host-visible and coherent, suitable for CPU->GPU transfers.
+ */
+static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
+    if (!r) {
+        return false;
+    }
+
+    /* If we already have a staging buffer with sufficient capacity, reuse it */
+    if (r->staging_buffer != VK_NULL_HANDLE && r->staging_size >= required_size) {
+        return true;
+    }
+
+    /* Clean up old staging buffer if it exists */
+    if (r->staging_mapped) {
+        r->fns.vkUnmapMemory(r->device, r->staging_memory);
+        r->staging_mapped = NULL;
+    }
+    if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
+        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        r->staging_buffer = VK_NULL_HANDLE;
+    }
+    if (r->staging_memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
+        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+        r->staging_memory = VK_NULL_HANDLE;
+    }
+    r->staging_size = 0;
+
+    /* Create new staging buffer with some extra padding for future reuse */
+    uint32_t alloc_size = required_size + (required_size / 4); /* 25% padding */
+
+    VkBufferCreateInfo buf_info;
+    memset(&buf_info, 0, sizeof(buf_info));
+    buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buf_info.size = alloc_size;
+    buf_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
+    buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkResult vr = r->fns.vkCreateBuffer(r->device, &buf_info, NULL, &r->staging_buffer);
+    if (vr != VK_SUCCESS || r->staging_buffer == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateBuffer (staging) failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    /* Get memory requirements for the staging buffer */
+    VkMemoryRequirements mem_req;
+    r->fns.vkGetBufferMemoryRequirements(r->device, r->staging_buffer, &mem_req);
+
+    /* Find a suitable memory type: host-visible and coherent for CPU mapping */
+    uint32_t mem_type = ne_vk_find_memory_type(
+        r,
+        mem_req.memoryTypeBits,
+        VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT
+    );
+
+    if (mem_type == UINT32_MAX) {
+        NE_LOG_ERROR("failed to find suitable memory type for staging buffer");
+        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        r->staging_buffer = VK_NULL_HANDLE;
+        return false;
+    }
+
+    /* Allocate memory for the staging buffer */
+    VkMemoryAllocateInfo alloc_info;
+    memset(&alloc_info, 0, sizeof(alloc_info));
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_req.size;
+    alloc_info.memoryTypeIndex = mem_type;
+
+    vr = r->fns.vkAllocateMemory(r->device, &alloc_info, NULL, &r->staging_memory);
+    if (vr != VK_SUCCESS || r->staging_memory == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkAllocateMemory (staging) failed (vr=%d)", (int)vr);
+        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        r->staging_buffer = VK_NULL_HANDLE;
+        return false;
+    }
+
+    /* Bind the memory to the buffer */
+    vr = r->fns.vkBindBufferMemory(r->device, r->staging_buffer, r->staging_memory, 0);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkBindBufferMemory (staging) failed (vr=%d)", (int)vr);
+        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+        r->staging_memory = VK_NULL_HANDLE;
+        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        r->staging_buffer = VK_NULL_HANDLE;
+        return false;
+    }
+
+    /* Map the staging memory for CPU access */
+    void *mapped_ptr = NULL;
+    vr = r->fns.vkMapMemory(r->device, r->staging_memory, 0, alloc_size, 0, &mapped_ptr);
+    if (vr != VK_SUCCESS || !mapped_ptr) {
+        NE_LOG_ERROR("vkMapMemory (staging) failed (vr=%d)", (int)vr);
+        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+        r->staging_memory = VK_NULL_HANDLE;
+        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        r->staging_buffer = VK_NULL_HANDLE;
+        return false;
+    }
+
+    r->staging_mapped = mapped_ptr;
+    r->staging_size = alloc_size;
+
+    return true;
 }
 
 static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
@@ -950,6 +1228,40 @@ void ne_renderer_destroy(NERenderer *r) {
     }
     r->surfaces = NULL;
 
+    /* Destroy all live buffers. */
+    for (uint32_t i = 0; i < r->buffer_cap; i++) {
+        if (r->buffers[i].occupied) {
+            if (r->buffers[i].buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
+                r->fns.vkDestroyBuffer(r->device, r->buffers[i].buffer, NULL);
+            }
+            if (r->buffers[i].memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
+                r->fns.vkFreeMemory(r->device, r->buffers[i].memory, NULL);
+            }
+        }
+    }
+    free(r->buffers);
+    r->buffers = NULL;
+    r->buffer_count = 0;
+    r->buffer_cap = 0;
+
+    /* Destroy staging buffer and transfer command pool. */
+    if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
+        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        r->staging_buffer = VK_NULL_HANDLE;
+    }
+    if (r->staging_memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
+        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+        r->staging_memory = VK_NULL_HANDLE;
+    }
+    r->staging_mapped = NULL;
+    r->staging_size = 0;
+
+    if (r->transfer_cmd_pool != VK_NULL_HANDLE && r->fns.vkDestroyCommandPool) {
+        r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
+        r->transfer_cmd_pool = VK_NULL_HANDLE;
+    }
+    r->transfer_cmd = VK_NULL_HANDLE;
+
     if (r->device != VK_NULL_HANDLE && r->fns.vkDestroyDevice) {
         (void)r->fns.vkDeviceWaitIdle(r->device);
         r->fns.vkDestroyDevice(r->device, NULL);
@@ -1250,4 +1562,375 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
     pass->surface = NULL;
+}
+
+/* ========================================================================
+ * GPU Buffer Management
+ * ======================================================================== */
+
+/**
+ * BUFFER ARCHITECTURE & DESCRIPTOR SET INTEGRATION
+ *
+ * Current Implementation:
+ * - Device-local GPU buffers for all resource types (vertex, index, uniform, storage)
+ * - Lazy staging buffer allocation on first data upload
+ * - Single reusable transfer command pool/buffer for all CPU->GPU transfers
+ * - Memory mapping via staging transfers (no direct host mapping)
+ *
+ * Descriptor Set Integration (Future):
+ * - Uniform buffers (UBO) will use descriptor set binding (currently use push constants)
+ * - Storage buffers (SSBO) will enable compute task operations
+ * - Flexible binding via descriptor sets instead of per-buffer mechanisms
+ * - Descriptor pool manages allocation; layout cache avoids redundant layouts
+ * 
+ * Current Buffer Usage Mapping:
+ * - NE_BUFFER_USAGE_VERTEX   → VK_BUFFER_USAGE_VERTEX_BUFFER_BIT
+ * - NE_BUFFER_USAGE_INDEX    → VK_BUFFER_USAGE_INDEX_BUFFER_BIT
+ * - NE_BUFFER_USAGE_UNIFORM  → VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT (future: descriptor binding)
+ * - NE_BUFFER_USAGE_STORAGE  → VK_BUFFER_USAGE_STORAGE_BUFFER_BIT (future: compute binding)
+ *
+ * All buffers also get VK_BUFFER_USAGE_TRANSFER_DST_BIT for staging updates.
+ */
+
+static bool ne_vk_submit_transfer_cmd(NERenderer *r, VkCommandBuffer cmd) {
+    if (!r || !r->transfer_cmd || cmd == VK_NULL_HANDLE) {
+        return false;
+    }
+
+    VkResult vr = r->fns.vkEndCommandBuffer(cmd);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkEndCommandBuffer (transfer) failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    /* Create a fence to wait for the transfer to complete */
+    VkFenceCreateInfo fence_info;
+    memset(&fence_info, 0, sizeof(fence_info));
+    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+    VkFence fence = VK_NULL_HANDLE;
+    vr = r->fns.vkCreateFence(r->device, &fence_info, NULL, &fence);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkCreateFence (transfer) failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    /* Submit the transfer command buffer */
+    VkSubmitInfo submit_info;
+    memset(&submit_info, 0, sizeof(submit_info));
+    submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+    submit_info.commandBufferCount = 1;
+    submit_info.pCommandBuffers = &cmd;
+
+    vr = r->fns.vkQueueSubmit(r->queue, 1, &submit_info, fence);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkQueueSubmit (transfer) failed (vr=%d)", (int)vr);
+        r->fns.vkDestroyFence(r->device, fence, NULL);
+        return false;
+    }
+
+    /* Wait for the transfer to complete */
+    vr = r->fns.vkWaitForFences(r->device, 1, &fence, VK_TRUE, UINT64_MAX);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkWaitForFences (transfer) failed (vr=%d)", (int)vr);
+        r->fns.vkDestroyFence(r->device, fence, NULL);
+        return false;
+    }
+
+    r->fns.vkDestroyFence(r->device, fence, NULL);
+    return true;
+}
+
+NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) {
+    if (!renderer || !desc || desc->size == 0) {
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    if (!desc->usage) {
+        NE_LOG_ERROR("buffer creation requires at least one usage flag");
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Allocate a slot from the buffer pool */
+    uint32_t slot_index = ne_pool_alloc(
+        (void **)&renderer->buffers,
+        &renderer->buffer_count,
+        &renderer->buffer_cap,
+        sizeof(NEVulkanBufferSlot)
+    );
+
+    if (slot_index == UINT32_MAX) {
+        NE_LOG_ERROR("failed to allocate buffer slot from pool");
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    /* Convert NEBufferUsage flags to VkBufferUsageFlags */
+    VkBufferUsageFlags vk_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT; /* All buffers can receive transfers */
+
+    if (desc->usage & NE_BUFFER_USAGE_VERTEX) {
+        vk_usage |= VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+    }
+    if (desc->usage & NE_BUFFER_USAGE_INDEX) {
+        vk_usage |= VK_BUFFER_USAGE_INDEX_BUFFER_BIT;
+    }
+    if (desc->usage & NE_BUFFER_USAGE_UNIFORM) {
+        vk_usage |= VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+    }
+    if (desc->usage & NE_BUFFER_USAGE_STORAGE) {
+        vk_usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+    }
+
+    /* Create the GPU buffer */
+    VkBufferCreateInfo buf_info;
+    memset(&buf_info, 0, sizeof(buf_info));
+    buf_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+    buf_info.size = desc->size;
+    buf_info.usage = vk_usage;
+    buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+    VkResult vr = renderer->fns.vkCreateBuffer(renderer->device, &buf_info, NULL, &slot->buffer);
+    if (vr != VK_SUCCESS || slot->buffer == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateBuffer failed (vr=%d, size=%u)", (int)vr, desc->size);
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Get memory requirements for the buffer */
+    VkMemoryRequirements mem_req;
+    renderer->fns.vkGetBufferMemoryRequirements(renderer->device, slot->buffer, &mem_req);
+
+    /* Find device-local memory for the GPU buffer */
+    uint32_t mem_type = ne_vk_find_memory_type(
+        renderer,
+        mem_req.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+
+    if (mem_type == UINT32_MAX) {
+        NE_LOG_ERROR("failed to find device-local memory type for buffer");
+        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        slot->buffer = VK_NULL_HANDLE;
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Allocate memory for the buffer */
+    VkMemoryAllocateInfo alloc_info;
+    memset(&alloc_info, 0, sizeof(alloc_info));
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_req.size;
+    alloc_info.memoryTypeIndex = mem_type;
+
+    vr = renderer->fns.vkAllocateMemory(renderer->device, &alloc_info, NULL, &slot->memory);
+    if (vr != VK_SUCCESS || slot->memory == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkAllocateMemory failed (vr=%d)", (int)vr);
+        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        slot->buffer = VK_NULL_HANDLE;
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Bind memory to buffer */
+    vr = renderer->fns.vkBindBufferMemory(renderer->device, slot->buffer, slot->memory, 0);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkBindBufferMemory failed (vr=%d)", (int)vr);
+        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+        slot->memory = VK_NULL_HANDLE;
+        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        slot->buffer = VK_NULL_HANDLE;
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* If initial data is provided, stage it to the buffer */
+    if (desc->initial_data) {
+        if (!ne_vk_ensure_staging_buffer(renderer, desc->size)) {
+            NE_LOG_ERROR("failed to ensure staging buffer for initial data");
+            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            slot->buffer = VK_NULL_HANDLE;
+            slot->occupied = false;
+            return NE_BUFFER_HANDLE_NULL;
+        }
+
+        /* Copy initial data into the staging buffer */
+        memcpy(renderer->staging_mapped, desc->initial_data, desc->size);
+
+        /* Flush the mapped memory range */
+        VkMappedMemoryRange flush_range;
+        memset(&flush_range, 0, sizeof(flush_range));
+        flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        flush_range.memory = renderer->staging_memory;
+        flush_range.offset = 0;
+        flush_range.size = desc->size;
+
+        vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
+        }
+
+        /* Record and submit transfer command */
+        VkCommandBufferBeginInfo begin_info;
+        memset(&begin_info, 0, sizeof(begin_info));
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
+            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            slot->buffer = VK_NULL_HANDLE;
+            slot->occupied = false;
+            return NE_BUFFER_HANDLE_NULL;
+        }
+
+        /* Record the copy command */
+        VkBufferCopy copy_region;
+        memset(&copy_region, 0, sizeof(copy_region));
+        copy_region.srcOffset = 0;
+        copy_region.dstOffset = 0;
+        copy_region.size = desc->size;
+
+        renderer->fns.vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
+
+        /* Submit and wait for completion */
+        if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
+            NE_LOG_ERROR("failed to submit transfer command for initial data");
+            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            slot->buffer = VK_NULL_HANDLE;
+            slot->occupied = false;
+            return NE_BUFFER_HANDLE_NULL;
+        }
+
+        /* Reset the command buffer for reuse */
+        vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
+        }
+    }
+
+    /* Mark the slot as occupied and store metadata */
+    slot->occupied = true;
+    slot->usage = desc->usage;
+    slot->size = desc->size;
+
+    /* Return handle (1-based ID for null safety) */
+    NEBufferHandle handle = {slot_index + 1};
+    return handle;
+}
+
+void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
+                      const void *data, uint32_t size, uint32_t offset) {
+    if (!renderer || !ne_buffer_handle_valid(handle) || !data || size == 0) {
+        return;
+    }
+
+    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
+
+    if (slot_index >= renderer->buffer_cap || !renderer->buffers[slot_index].occupied) {
+        NE_LOG_WARN("buffer_update called on invalid or destroyed buffer handle");
+        return;
+    }
+
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    /* Ensure we have a staging buffer for the update */
+    if (!ne_vk_ensure_staging_buffer(renderer, offset + size)) {
+        NE_LOG_ERROR("failed to ensure staging buffer for buffer update");
+        return;
+    }
+
+    /* Copy the updated data into the staging buffer */
+    memcpy((uint8_t *)renderer->staging_mapped + offset, data, size);
+
+    /* Flush the mapped memory range */
+    VkMappedMemoryRange flush_range;
+    memset(&flush_range, 0, sizeof(flush_range));
+    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    flush_range.memory = renderer->staging_memory;
+    flush_range.offset = offset;
+    flush_range.size = size;
+
+    VkResult vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
+    }
+
+    /* Record the copy command */
+    VkCommandBufferBeginInfo begin_info;
+    memset(&begin_info, 0, sizeof(begin_info));
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
+        return;
+    }
+
+    VkBufferCopy copy_region;
+    memset(&copy_region, 0, sizeof(copy_region));
+    copy_region.srcOffset = offset;
+    copy_region.dstOffset = offset;
+    copy_region.size = size;
+
+    renderer->fns.vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
+
+    /* Submit and wait for completion */
+    if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
+        NE_LOG_ERROR("failed to submit transfer command for buffer update");
+        return;
+    }
+
+    /* Reset the command buffer for reuse */
+    vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
+    }
+}
+
+void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
+    if (!renderer || !ne_buffer_handle_valid(handle)) {
+        return;
+    }
+
+    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
+
+    if (slot_index >= renderer->buffer_cap) {
+        return;
+    }
+
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    if (!slot->occupied) {
+        return; /* Already destroyed or never existed */
+    }
+
+    /* Destroy the buffer and free its memory */
+    if (slot->buffer != VK_NULL_HANDLE && renderer->fns.vkDestroyBuffer) {
+        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        slot->buffer = VK_NULL_HANDLE;
+    }
+
+    if (slot->memory != VK_NULL_HANDLE && renderer->fns.vkFreeMemory) {
+        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+        slot->memory = VK_NULL_HANDLE;
+    }
+
+    /* Mark the slot as unoccupied */
+    slot->occupied = false;
+    slot->usage = 0;
+    slot->size = 0;
+
+    /* Decrement the count */
+    if (renderer->buffer_count > 0) {
+        renderer->buffer_count--;
+    }
 }
