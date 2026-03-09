@@ -13,6 +13,7 @@
 #include "ne_log.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
+#include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
 
@@ -113,6 +114,36 @@ typedef struct NEVulkanFns {
     /* Shader management */
     PFN_vkCreateShaderModule vkCreateShaderModule;
     PFN_vkDestroyShaderModule vkDestroyShaderModule;
+
+    /* Render pass */
+    PFN_vkCreateRenderPass vkCreateRenderPass;
+    PFN_vkDestroyRenderPass vkDestroyRenderPass;
+
+    /* Image views */
+    PFN_vkCreateImageView vkCreateImageView;
+    PFN_vkDestroyImageView vkDestroyImageView;
+
+    /* Framebuffers */
+    PFN_vkCreateFramebuffer vkCreateFramebuffer;
+    PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
+
+    /* Pipeline */
+    PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
+    PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
+    PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
+    PFN_vkDestroyPipeline vkDestroyPipeline;
+
+    /* Render pass commands */
+    PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
+    PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
+    PFN_vkCmdBindPipeline vkCmdBindPipeline;
+    PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers;
+    PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
+    PFN_vkCmdSetViewport vkCmdSetViewport;
+    PFN_vkCmdSetScissor vkCmdSetScissor;
+    PFN_vkCmdDraw vkCmdDraw;
+    PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
+    PFN_vkCmdPushConstants vkCmdPushConstants;
 } NEVulkanFunctions;
 
 enum {
@@ -189,6 +220,34 @@ typedef struct NEVulkanShaderSlot {
     char *entry_point;          /* strdup'd entry point name */
 } NEVulkanShaderSlot;
 
+/* ── Pipeline resource pool ─────────────────────────────────────────────── */
+
+typedef struct NEVulkanPipelineSlot {
+    bool occupied;
+    bool needs_compile;         /* true until first successful vkCreateGraphicsPipelines */
+    bool compilation_failed;    /* true if deferred compilation failed */
+
+    /* Eagerly created at ne_pipeline_create time. */
+    VkPipelineLayout layout;
+
+    /* Captured state for deferred vkCreateGraphicsPipelines. */
+    VkShaderModule vert_module;
+    VkShaderModule frag_module;
+    char *vert_entry;           /* strdup'd entry point name */
+    char *frag_entry;           /* strdup'd entry point name */
+
+    VkVertexInputBindingDescription *bindings;
+    uint32_t binding_count;
+    VkVertexInputAttributeDescription *attributes;
+    uint32_t attribute_count;
+
+    VkPrimitiveTopology topology;
+    VkPipelineColorBlendAttachmentState blend;
+
+    /* Created during deferred compilation (VK_NULL_HANDLE until then). */
+    VkPipeline pipeline;
+} NEVulkanPipelineSlot;
+
 typedef struct NESwapchain {
     VkSwapchainKHR swapchain;
     VkFormat format;
@@ -197,6 +256,8 @@ typedef struct NESwapchain {
 
     VkImage *images;
     VkImageLayout *image_layouts;
+    VkImageView *image_views;
+    VkFramebuffer *framebuffers;
     uint32_t image_count;
 
     /* One command pool, one command buffer per frame-in-flight. */
@@ -275,6 +336,11 @@ struct NERenderer {
     uint32_t shader_count;
     uint32_t shader_cap;
 
+    /* Pipeline resource pool */
+    NEVulkanPipelineSlot *pipelines;
+    uint32_t pipeline_count;
+    uint32_t pipeline_cap;
+
     /* Runtime GLSL → SPIR-V compilation via shaderc (loaded dynamically). */
     NEShaderc shaderc;
     NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
@@ -288,6 +354,7 @@ struct NERenderSurface {
 
     VkSurfaceKHR surface;
     NESwapchain sc;
+    VkRenderPass render_pass;
 
     bool wants_swapchain_recreate;
 
@@ -400,6 +467,29 @@ static void ne_vk_sc_cleanup(NERenderer *r, NESwapchain *sc) {
 
     if (r->device != VK_NULL_HANDLE && r->fns.vkDeviceWaitIdle) {
         (void)r->fns.vkDeviceWaitIdle(r->device);
+    }
+
+    /* Destroy framebuffers before image views (framebuffers reference views). */
+    if (sc->framebuffers && r->fns.vkDestroyFramebuffer) {
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            if (sc->framebuffers[i] != VK_NULL_HANDLE) {
+                r->fns.vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
+                sc->framebuffers[i] = VK_NULL_HANDLE;
+            }
+        }
+        free(sc->framebuffers);
+        sc->framebuffers = NULL;
+    }
+
+    if (sc->image_views && r->fns.vkDestroyImageView) {
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            if (sc->image_views[i] != VK_NULL_HANDLE) {
+                r->fns.vkDestroyImageView(r->device, sc->image_views[i], NULL);
+                sc->image_views[i] = VK_NULL_HANDLE;
+            }
+        }
+        free(sc->image_views);
+        sc->image_views = NULL;
     }
 
     if (sc->cmd_pool != VK_NULL_HANDLE && r->fns.vkDestroyCommandPool) {
@@ -565,13 +655,52 @@ static bool ne_vk_load_device_fns(NERenderer *r) {
     f->vkCreateShaderModule = (PFN_vkCreateShaderModule)ne_vk_get_device(f, r->device, "vkCreateShaderModule");
     f->vkDestroyShaderModule = (PFN_vkDestroyShaderModule)ne_vk_get_device(f, r->device, "vkDestroyShaderModule");
 
+    /* Render pass */
+    f->vkCreateRenderPass = (PFN_vkCreateRenderPass)ne_vk_get_device(f, r->device, "vkCreateRenderPass");
+    f->vkDestroyRenderPass = (PFN_vkDestroyRenderPass)ne_vk_get_device(f, r->device, "vkDestroyRenderPass");
+
+    /* Image views */
+    f->vkCreateImageView = (PFN_vkCreateImageView)ne_vk_get_device(f, r->device, "vkCreateImageView");
+    f->vkDestroyImageView = (PFN_vkDestroyImageView)ne_vk_get_device(f, r->device, "vkDestroyImageView");
+
+    /* Framebuffers */
+    f->vkCreateFramebuffer = (PFN_vkCreateFramebuffer)ne_vk_get_device(f, r->device, "vkCreateFramebuffer");
+    f->vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)ne_vk_get_device(f, r->device, "vkDestroyFramebuffer");
+
+    /* Pipeline */
+    f->vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)ne_vk_get_device(f, r->device, "vkCreatePipelineLayout");
+    f->vkDestroyPipelineLayout = (PFN_vkDestroyPipelineLayout)ne_vk_get_device(f, r->device, "vkDestroyPipelineLayout");
+    f->vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)ne_vk_get_device(f, r->device, "vkCreateGraphicsPipelines");
+    f->vkDestroyPipeline = (PFN_vkDestroyPipeline)ne_vk_get_device(f, r->device, "vkDestroyPipeline");
+
+    /* Render pass commands */
+    f->vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)ne_vk_get_device(f, r->device, "vkCmdBeginRenderPass");
+    f->vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)ne_vk_get_device(f, r->device, "vkCmdEndRenderPass");
+    f->vkCmdBindPipeline = (PFN_vkCmdBindPipeline)ne_vk_get_device(f, r->device, "vkCmdBindPipeline");
+    f->vkCmdBindVertexBuffers = (PFN_vkCmdBindVertexBuffers)ne_vk_get_device(f, r->device, "vkCmdBindVertexBuffers");
+    f->vkCmdBindIndexBuffer = (PFN_vkCmdBindIndexBuffer)ne_vk_get_device(f, r->device, "vkCmdBindIndexBuffer");
+    f->vkCmdSetViewport = (PFN_vkCmdSetViewport)ne_vk_get_device(f, r->device, "vkCmdSetViewport");
+    f->vkCmdSetScissor = (PFN_vkCmdSetScissor)ne_vk_get_device(f, r->device, "vkCmdSetScissor");
+    f->vkCmdDraw = (PFN_vkCmdDraw)ne_vk_get_device(f, r->device, "vkCmdDraw");
+    f->vkCmdDrawIndexed = (PFN_vkCmdDrawIndexed)ne_vk_get_device(f, r->device, "vkCmdDrawIndexed");
+    f->vkCmdPushConstants = (PFN_vkCmdPushConstants)ne_vk_get_device(f, r->device, "vkCmdPushConstants");
+
     return f->vkDestroyDevice && f->vkGetDeviceQueue && f->vkCreateSwapchainKHR && f->vkGetSwapchainImagesKHR &&
            f->vkAcquireNextImageKHR && f->vkQueueSubmit && f->vkQueuePresentKHR && f->vkCreateSemaphore && f->vkCreateFence &&
            f->vkWaitForFences && f->vkResetFences && f->vkCreateCommandPool && f->vkResetCommandBuffer && f->vkAllocateCommandBuffers &&
            f->vkBeginCommandBuffer && f->vkEndCommandBuffer && f->vkCmdPipelineBarrier && f->vkCmdClearColorImage &&
            f->vkCreateBuffer && f->vkDestroyBuffer && f->vkGetBufferMemoryRequirements && f->vkAllocateMemory && f->vkFreeMemory && f->vkBindBufferMemory &&
            f->vkMapMemory && f->vkUnmapMemory && f->vkFlushMappedMemoryRanges && f->vkCmdCopyBuffer &&
-           f->vkCreateShaderModule && f->vkDestroyShaderModule;
+           f->vkCreateShaderModule && f->vkDestroyShaderModule &&
+           f->vkCreateRenderPass && f->vkDestroyRenderPass &&
+           f->vkCreateImageView && f->vkDestroyImageView &&
+           f->vkCreateFramebuffer && f->vkDestroyFramebuffer &&
+           f->vkCreatePipelineLayout && f->vkDestroyPipelineLayout &&
+           f->vkCreateGraphicsPipelines && f->vkDestroyPipeline &&
+           f->vkCmdBeginRenderPass && f->vkCmdEndRenderPass &&
+           f->vkCmdBindPipeline && f->vkCmdBindVertexBuffers && f->vkCmdBindIndexBuffer &&
+           f->vkCmdSetViewport && f->vkCmdSetScissor &&
+           f->vkCmdDraw && f->vkCmdDrawIndexed && f->vkCmdPushConstants;
 }
 
 static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
@@ -936,6 +1065,75 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
     return true;
 }
 
+/**
+ * Create (or recreate) the surface's VkRenderPass.
+ *
+ * The render pass is a single-subpass, single color attachment configuration:
+ *   - loadOp  = CLEAR  (clears to the surface's clear_color each frame)
+ *   - storeOp = STORE  (presents the result)
+ *   - layout  = UNDEFINED → COLOR_ATTACHMENT_OPTIMAL → PRESENT_SRC_KHR
+ *
+ * Only recreated when the swapchain format changes.
+ */
+static bool ne_vk_create_render_pass(NERenderSurface *surface, VkFormat format) {
+    NERenderer *r = surface->renderer;
+
+    /* Destroy previous render pass if format changed. */
+    if (surface->render_pass != VK_NULL_HANDLE) {
+        r->fns.vkDestroyRenderPass(r->device, surface->render_pass, NULL);
+        surface->render_pass = VK_NULL_HANDLE;
+    }
+
+    VkAttachmentDescription color_attachment;
+    memset(&color_attachment, 0, sizeof(color_attachment));
+    color_attachment.format         = format;
+    color_attachment.samples        = VK_SAMPLE_COUNT_1_BIT;
+    color_attachment.loadOp         = VK_ATTACHMENT_LOAD_OP_CLEAR;
+    color_attachment.storeOp        = VK_ATTACHMENT_STORE_OP_STORE;
+    color_attachment.stencilLoadOp  = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+    color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+    color_attachment.initialLayout  = VK_IMAGE_LAYOUT_UNDEFINED;
+    color_attachment.finalLayout    = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+
+    VkAttachmentReference color_ref;
+    memset(&color_ref, 0, sizeof(color_ref));
+    color_ref.attachment = 0;
+    color_ref.layout     = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+
+    VkSubpassDescription subpass;
+    memset(&subpass, 0, sizeof(subpass));
+    subpass.pipelineBindPoint    = VK_PIPELINE_BIND_POINT_GRAPHICS;
+    subpass.colorAttachmentCount = 1;
+    subpass.pColorAttachments    = &color_ref;
+
+    VkSubpassDependency dependency;
+    memset(&dependency, 0, sizeof(dependency));
+    dependency.srcSubpass    = VK_SUBPASS_EXTERNAL;
+    dependency.dstSubpass    = 0;
+    dependency.srcStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.srcAccessMask = 0;
+    dependency.dstStageMask  = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    dependency.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+
+    VkRenderPassCreateInfo rpci;
+    memset(&rpci, 0, sizeof(rpci));
+    rpci.sType           = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+    rpci.attachmentCount = 1;
+    rpci.pAttachments    = &color_attachment;
+    rpci.subpassCount    = 1;
+    rpci.pSubpasses      = &subpass;
+    rpci.dependencyCount = 1;
+    rpci.pDependencies   = &dependency;
+
+    VkResult vr = r->fns.vkCreateRenderPass(r->device, &rpci, NULL, &surface->render_pass);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkCreateRenderPass failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    return true;
+}
+
 static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
     if (!surface || !surface->renderer) {
         return false;
@@ -1044,7 +1242,7 @@ static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
     sci.imageColorSpace = chosen_format.colorSpace;
     sci.imageExtent = extent;
     sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
     sci.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
                                                                                           : caps.currentTransform;
@@ -1094,6 +1292,66 @@ static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
     }
     for (uint32_t i = 0; i < surface->sc.image_count; i++) {
         surface->sc.images_in_flight[i] = VK_NULL_HANDLE;
+    }
+
+    /* ── Render pass (created once per surface, or recreated on format change) ── */
+
+    if (surface->render_pass == VK_NULL_HANDLE) {
+        if (!ne_vk_create_render_pass(surface, surface->sc.format)) {
+            return false;
+        }
+    }
+
+    /* ── Image views ──────────────────────────────────────────────────────── */
+
+    surface->sc.image_views = (VkImageView *)calloc(img_count, sizeof(VkImageView));
+    if (!surface->sc.image_views) {
+        return false;
+    }
+
+    for (uint32_t i = 0; i < img_count; i++) {
+        VkImageViewCreateInfo ivci;
+        memset(&ivci, 0, sizeof(ivci));
+        ivci.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        ivci.image    = surface->sc.images[i];
+        ivci.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        ivci.format   = surface->sc.format;
+        ivci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
+        ivci.subresourceRange.baseMipLevel   = 0;
+        ivci.subresourceRange.levelCount     = 1;
+        ivci.subresourceRange.baseArrayLayer = 0;
+        ivci.subresourceRange.layerCount     = 1;
+
+        vr = r->fns.vkCreateImageView(r->device, &ivci, NULL, &surface->sc.image_views[i]);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkCreateImageView[%u] failed (vr=%d)", (unsigned)i, (int)vr);
+            return false;
+        }
+    }
+
+    /* ── Framebuffers ─────────────────────────────────────────────────────── */
+
+    surface->sc.framebuffers = (VkFramebuffer *)calloc(img_count, sizeof(VkFramebuffer));
+    if (!surface->sc.framebuffers) {
+        return false;
+    }
+
+    for (uint32_t i = 0; i < img_count; i++) {
+        VkFramebufferCreateInfo fbci;
+        memset(&fbci, 0, sizeof(fbci));
+        fbci.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbci.renderPass      = surface->render_pass;
+        fbci.attachmentCount = 1;
+        fbci.pAttachments    = &surface->sc.image_views[i];
+        fbci.width           = surface->sc.extent.width;
+        fbci.height          = surface->sc.extent.height;
+        fbci.layers          = 1;
+
+        vr = r->fns.vkCreateFramebuffer(r->device, &fbci, NULL, &surface->sc.framebuffers[i]);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkCreateFramebuffer[%u] failed (vr=%d)", (unsigned)i, (int)vr);
+            return false;
+        }
     }
 
     VkCommandPoolCreateInfo cpci;
@@ -1305,6 +1563,11 @@ void ne_renderer_destroy(NERenderer *r) {
 
         ne_vk_sc_cleanup(r, &s->sc);
 
+        if (s->render_pass != VK_NULL_HANDLE && r->fns.vkDestroyRenderPass) {
+            r->fns.vkDestroyRenderPass(r->device, s->render_pass, NULL);
+            s->render_pass = VK_NULL_HANDLE;
+        }
+
         if (s->surface != VK_NULL_HANDLE && r->fns.vkDestroySurfaceKHR) {
             r->fns.vkDestroySurfaceKHR(r->instance, s->surface, NULL);
             s->surface = VK_NULL_HANDLE;
@@ -1347,6 +1610,26 @@ void ne_renderer_destroy(NERenderer *r) {
     r->shaders = NULL;
     r->shader_count = 0;
     r->shader_cap = 0;
+
+    /* Destroy all live pipelines. */
+    for (uint32_t i = 0; i < r->pipeline_cap; i++) {
+        if (r->pipelines[i].occupied) {
+            if (r->pipelines[i].pipeline != VK_NULL_HANDLE && r->fns.vkDestroyPipeline) {
+                r->fns.vkDestroyPipeline(r->device, r->pipelines[i].pipeline, NULL);
+            }
+            if (r->pipelines[i].layout != VK_NULL_HANDLE && r->fns.vkDestroyPipelineLayout) {
+                r->fns.vkDestroyPipelineLayout(r->device, r->pipelines[i].layout, NULL);
+            }
+            free(r->pipelines[i].vert_entry);
+            free(r->pipelines[i].frag_entry);
+            free(r->pipelines[i].bindings);
+            free(r->pipelines[i].attributes);
+        }
+    }
+    free(r->pipelines);
+    r->pipelines = NULL;
+    r->pipeline_count = 0;
+    r->pipeline_cap = 0;
 
     /* Release the shaderc compiler and unload the DLL. */
     if (r->shaderc.compiler && r->shaderc.compiler_release) {
@@ -1484,6 +1767,11 @@ void ne_renderer_destroy_surface(NERenderer *r, NERenderSurface *surface) {
     }
 
     ne_vk_sc_cleanup(r, &surface->sc);
+
+    if (surface->render_pass != VK_NULL_HANDLE) {
+        r->fns.vkDestroyRenderPass(r->device, surface->render_pass, NULL);
+        surface->render_pass = VK_NULL_HANDLE;
+    }
 
     if (surface->surface != VK_NULL_HANDLE) {
         r->fns.vkDestroySurfaceKHR(r->instance, surface->surface, NULL);
@@ -2308,4 +2596,427 @@ void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
     if (renderer->shader_count > 0) {
         renderer->shader_count--;
     }
+}
+
+/* ========================================================================
+ * Pipeline Management
+ * ======================================================================== */
+
+/*
+ * PIPELINE ARCHITECTURE — DEFERRED COMPILATION
+ *
+ * ne_pipeline_create() validates inputs, resolves shader handles, deep-copies
+ * vertex layout state, creates the VkPipelineLayout, and stores everything in
+ * a pool slot with needs_compile = true.
+ *
+ * The actual vkCreateGraphicsPipelines call is deferred until
+ * ne_render_pass_set_pipeline() (Task #5), where we have access to the
+ * surface's VkRenderPass.  This avoids coupling pipeline creation to any
+ * specific render surface.
+ *
+ * ne_vk_pipeline_compile() is the internal helper that performs the deferred
+ * compilation.  It is called from ne_render_pass_set_pipeline() on first use.
+ */
+
+/* ── Enum converters ─────────────────────────────────────────────────────── */
+
+static VkFormat ne_vertex_format_to_vk(NEVertexFormat fmt) {
+    switch (fmt) {
+    case NE_VERTEX_FORMAT_FLOAT:    return VK_FORMAT_R32_SFLOAT;
+    case NE_VERTEX_FORMAT_FLOAT2:   return VK_FORMAT_R32G32_SFLOAT;
+    case NE_VERTEX_FORMAT_FLOAT3:   return VK_FORMAT_R32G32B32_SFLOAT;
+    case NE_VERTEX_FORMAT_FLOAT4:   return VK_FORMAT_R32G32B32A32_SFLOAT;
+    case NE_VERTEX_FORMAT_UNORM8X4: return VK_FORMAT_R8G8B8A8_UNORM;
+    default:                        return VK_FORMAT_R32G32B32A32_SFLOAT;
+    }
+}
+
+static VkBlendFactor ne_blend_factor_to_vk(NEBlendFactor f) {
+    switch (f) {
+    case NE_BLEND_FACTOR_ZERO:                return VK_BLEND_FACTOR_ZERO;
+    case NE_BLEND_FACTOR_ONE:                 return VK_BLEND_FACTOR_ONE;
+    case NE_BLEND_FACTOR_SRC_ALPHA:           return VK_BLEND_FACTOR_SRC_ALPHA;
+    case NE_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+    case NE_BLEND_FACTOR_DST_ALPHA:           return VK_BLEND_FACTOR_DST_ALPHA;
+    case NE_BLEND_FACTOR_ONE_MINUS_DST_ALPHA: return VK_BLEND_FACTOR_ONE_MINUS_DST_ALPHA;
+    default:                                  return VK_BLEND_FACTOR_ZERO;
+    }
+}
+
+static VkBlendOp ne_blend_op_to_vk(NEBlendOp op) {
+    switch (op) {
+    case NE_BLEND_OP_ADD:              return VK_BLEND_OP_ADD;
+    case NE_BLEND_OP_SUBTRACT:         return VK_BLEND_OP_SUBTRACT;
+    case NE_BLEND_OP_REVERSE_SUBTRACT: return VK_BLEND_OP_REVERSE_SUBTRACT;
+    case NE_BLEND_OP_MIN:              return VK_BLEND_OP_MIN;
+    case NE_BLEND_OP_MAX:              return VK_BLEND_OP_MAX;
+    default:                           return VK_BLEND_OP_ADD;
+    }
+}
+
+static VkPrimitiveTopology ne_topology_to_vk(NEPrimitiveTopology t) {
+    switch (t) {
+    case NE_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST:  return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    case NE_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP: return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_STRIP;
+    case NE_PRIMITIVE_TOPOLOGY_LINE_LIST:      return VK_PRIMITIVE_TOPOLOGY_LINE_LIST;
+    case NE_PRIMITIVE_TOPOLOGY_LINE_STRIP:     return VK_PRIMITIVE_TOPOLOGY_LINE_STRIP;
+    case NE_PRIMITIVE_TOPOLOGY_POINT_LIST:     return VK_PRIMITIVE_TOPOLOGY_POINT_LIST;
+    default:                                   return VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+    }
+}
+
+/* ── Deferred pipeline compilation ───────────────────────────────────────── */
+
+/**
+ * Compile a pipeline slot into a live VkPipeline.
+ *
+ * Called from ne_render_pass_set_pipeline() when slot->needs_compile is true.
+ * Requires a valid VkRenderPass from the active render surface.
+ *
+ * On success: clears needs_compile, sets slot->pipeline.
+ * On failure: sets compilation_failed, logs error.
+ */
+static bool ne_vk_pipeline_compile(NERenderer *r, NEVulkanPipelineSlot *slot,
+                                   VkRenderPass render_pass) {
+    /* ── Shader stages ───────────────────────────────────────────────── */
+
+    VkPipelineShaderStageCreateInfo stages[2];
+    memset(stages, 0, sizeof(stages));
+
+    stages[0].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[0].stage  = VK_SHADER_STAGE_VERTEX_BIT;
+    stages[0].module = slot->vert_module;
+    stages[0].pName  = slot->vert_entry;
+
+    stages[1].sType  = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+    stages[1].stage  = VK_SHADER_STAGE_FRAGMENT_BIT;
+    stages[1].module = slot->frag_module;
+    stages[1].pName  = slot->frag_entry;
+
+    /* ── Vertex input state ──────────────────────────────────────────── */
+
+    VkPipelineVertexInputStateCreateInfo vertex_input;
+    memset(&vertex_input, 0, sizeof(vertex_input));
+    vertex_input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+    vertex_input.vertexBindingDescriptionCount   = slot->binding_count;
+    vertex_input.pVertexBindingDescriptions      = slot->bindings;
+    vertex_input.vertexAttributeDescriptionCount = slot->attribute_count;
+    vertex_input.pVertexAttributeDescriptions    = slot->attributes;
+
+    /* ── Input assembly ──────────────────────────────────────────────── */
+
+    VkPipelineInputAssemblyStateCreateInfo input_assembly;
+    memset(&input_assembly, 0, sizeof(input_assembly));
+    input_assembly.sType    = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+    input_assembly.topology = slot->topology;
+    input_assembly.primitiveRestartEnable = VK_FALSE;
+
+    /* ── Viewport / scissor (dynamic — values set at draw time) ──────── */
+
+    VkPipelineViewportStateCreateInfo viewport_state;
+    memset(&viewport_state, 0, sizeof(viewport_state));
+    viewport_state.sType         = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+    viewport_state.viewportCount = 1;
+    viewport_state.scissorCount  = 1;
+
+    /* ── Rasterization ───────────────────────────────────────────────── */
+
+    VkPipelineRasterizationStateCreateInfo rasterization;
+    memset(&rasterization, 0, sizeof(rasterization));
+    rasterization.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+    rasterization.polygonMode = VK_POLYGON_MODE_FILL;
+    rasterization.cullMode    = VK_CULL_MODE_BACK_BIT;
+    rasterization.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
+    rasterization.lineWidth   = 1.0f;
+
+    /* ── Multisample (no MSAA) ───────────────────────────────────────── */
+
+    VkPipelineMultisampleStateCreateInfo multisample;
+    memset(&multisample, 0, sizeof(multisample));
+    multisample.sType                = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+    multisample.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+    /* ── Color blend ─────────────────────────────────────────────────── */
+
+    VkPipelineColorBlendStateCreateInfo color_blend;
+    memset(&color_blend, 0, sizeof(color_blend));
+    color_blend.sType           = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+    color_blend.attachmentCount = 1;
+    color_blend.pAttachments    = &slot->blend;
+
+    /* ── Dynamic state ───────────────────────────────────────────────── */
+
+    VkDynamicState dynamic_states[] = {
+        VK_DYNAMIC_STATE_VIEWPORT,
+        VK_DYNAMIC_STATE_SCISSOR,
+    };
+
+    VkPipelineDynamicStateCreateInfo dynamic_state;
+    memset(&dynamic_state, 0, sizeof(dynamic_state));
+    dynamic_state.sType             = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+    dynamic_state.dynamicStateCount = 2;
+    dynamic_state.pDynamicStates    = dynamic_states;
+
+    /* ── Graphics pipeline ───────────────────────────────────────────── */
+
+    VkGraphicsPipelineCreateInfo gpci;
+    memset(&gpci, 0, sizeof(gpci));
+    gpci.sType               = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+    gpci.stageCount          = 2;
+    gpci.pStages             = stages;
+    gpci.pVertexInputState   = &vertex_input;
+    gpci.pInputAssemblyState = &input_assembly;
+    gpci.pViewportState      = &viewport_state;
+    gpci.pRasterizationState = &rasterization;
+    gpci.pMultisampleState   = &multisample;
+    gpci.pColorBlendState    = &color_blend;
+    gpci.pDynamicState       = &dynamic_state;
+    gpci.layout              = slot->layout;
+    gpci.renderPass          = render_pass;
+    gpci.subpass             = 0;
+
+    VkResult vr = r->fns.vkCreateGraphicsPipelines(
+        r->device, VK_NULL_HANDLE, 1, &gpci, NULL, &slot->pipeline);
+
+    if (vr != VK_SUCCESS || slot->pipeline == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateGraphicsPipelines failed (vr=%d)", (int)vr);
+        slot->compilation_failed = true;
+        slot->pipeline = VK_NULL_HANDLE;
+        return false;
+    }
+
+    slot->needs_compile = false;
+    return true;
+}
+
+/* ── ne_pipeline_create ──────────────────────────────────────────────────── */
+
+NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *desc) {
+    if (!renderer || !desc) {
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Validate inputs ─────────────────────────────────────────────── */
+
+    if (!ne_shader_handle_valid(desc->vertex_shader)) {
+        NE_LOG_ERROR("ne_pipeline_create: vertex_shader handle is null");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+    if (!ne_shader_handle_valid(desc->fragment_shader)) {
+        NE_LOG_ERROR("ne_pipeline_create: fragment_shader handle is null");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+    if (!desc->vertex_layouts || desc->vertex_layout_count == 0) {
+        NE_LOG_ERROR("ne_pipeline_create: vertex_layouts is null or count is 0");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Resolve shader handles ──────────────────────────────────────── */
+
+    const uint32_t vs_index = desc->vertex_shader.id - 1;
+    const uint32_t fs_index = desc->fragment_shader.id - 1;
+
+    if (vs_index >= renderer->shader_cap || !renderer->shaders[vs_index].occupied) {
+        NE_LOG_ERROR("ne_pipeline_create: vertex_shader handle (id=%u) is invalid or destroyed",
+                     desc->vertex_shader.id);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+    if (fs_index >= renderer->shader_cap || !renderer->shaders[fs_index].occupied) {
+        NE_LOG_ERROR("ne_pipeline_create: fragment_shader handle (id=%u) is invalid or destroyed",
+                     desc->fragment_shader.id);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    NEVulkanShaderSlot *vs_slot = &renderer->shaders[vs_index];
+    NEVulkanShaderSlot *fs_slot = &renderer->shaders[fs_index];
+
+    /* ── Deep-copy vertex layout ─────────────────────────────────────── */
+
+    uint32_t total_attributes = 0;
+    for (uint32_t i = 0; i < desc->vertex_layout_count; i++) {
+        total_attributes += desc->vertex_layouts[i].attribute_count;
+    }
+
+    VkVertexInputBindingDescription *bindings = (VkVertexInputBindingDescription *)calloc(
+        desc->vertex_layout_count, sizeof(VkVertexInputBindingDescription));
+    VkVertexInputAttributeDescription *attributes = (VkVertexInputAttributeDescription *)calloc(
+        total_attributes, sizeof(VkVertexInputAttributeDescription));
+
+    if (!bindings || !attributes) {
+        NE_LOG_ERROR("ne_pipeline_create: out of memory for vertex layout");
+        free(bindings);
+        free(attributes);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    uint32_t attr_index = 0;
+    for (uint32_t i = 0; i < desc->vertex_layout_count; i++) {
+        const NEVertexBufferLayout *layout = &desc->vertex_layouts[i];
+
+        bindings[i].binding   = i;
+        bindings[i].stride    = layout->stride;
+        bindings[i].inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        for (uint32_t j = 0; j < layout->attribute_count; j++) {
+            const NEVertexAttribute *attr = &layout->attributes[j];
+            attributes[attr_index].location = attr->location;
+            attributes[attr_index].binding  = i;
+            attributes[attr_index].format   = ne_vertex_format_to_vk(attr->format);
+            attributes[attr_index].offset   = attr->offset;
+            attr_index++;
+        }
+    }
+
+    /* ── Convert blend state ─────────────────────────────────────────── */
+
+    VkPipelineColorBlendAttachmentState blend_attachment;
+    memset(&blend_attachment, 0, sizeof(blend_attachment));
+    blend_attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT |
+                                     VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+
+    if (desc->blend.enabled) {
+        blend_attachment.blendEnable         = VK_TRUE;
+        blend_attachment.srcColorBlendFactor = ne_blend_factor_to_vk(desc->blend.src_color);
+        blend_attachment.dstColorBlendFactor = ne_blend_factor_to_vk(desc->blend.dst_color);
+        blend_attachment.colorBlendOp        = ne_blend_op_to_vk(desc->blend.color_op);
+        blend_attachment.srcAlphaBlendFactor = ne_blend_factor_to_vk(desc->blend.src_alpha);
+        blend_attachment.dstAlphaBlendFactor = ne_blend_factor_to_vk(desc->blend.dst_alpha);
+        blend_attachment.alphaBlendOp        = ne_blend_op_to_vk(desc->blend.alpha_op);
+    }
+
+    /* ── Create pipeline layout ──────────────────────────────────────── */
+
+    VkPushConstantRange push_range;
+    memset(&push_range, 0, sizeof(push_range));
+    push_range.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+    push_range.offset     = 0;
+    push_range.size       = 128; /* Guaranteed minimum by Vulkan spec. */
+
+    VkPipelineLayoutCreateInfo plci;
+    memset(&plci, 0, sizeof(plci));
+    plci.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    plci.pushConstantRangeCount = 1;
+    plci.pPushConstantRanges    = &push_range;
+
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkResult vr = renderer->fns.vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
+    if (vr != VK_SUCCESS || layout == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreatePipelineLayout failed (vr=%d)", (int)vr);
+        free(bindings);
+        free(attributes);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Allocate pool slot ──────────────────────────────────────────── */
+
+    const uint32_t slot_index = ne_pool_alloc(
+        (void **)&renderer->pipelines,
+        &renderer->pipeline_count,
+        &renderer->pipeline_cap,
+        sizeof(NEVulkanPipelineSlot)
+    );
+
+    if (slot_index == UINT32_MAX) {
+        NE_LOG_ERROR("ne_pipeline_create: pipeline pool allocation failed");
+        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        free(bindings);
+        free(attributes);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    NEVulkanPipelineSlot *slot = &renderer->pipelines[slot_index];
+
+    slot->occupied           = true;
+    slot->needs_compile      = true;
+    slot->compilation_failed = false;
+
+    slot->layout       = layout;
+    slot->vert_module  = vs_slot->module;
+    slot->frag_module  = fs_slot->module;
+    slot->vert_entry   = _strdup(vs_slot->entry_point);
+    slot->frag_entry   = _strdup(fs_slot->entry_point);
+
+    if (!slot->vert_entry || !slot->frag_entry) {
+        NE_LOG_ERROR("ne_pipeline_create: out of memory copying entry point names");
+        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        free(slot->vert_entry);
+        free(slot->frag_entry);
+        free(bindings);
+        free(attributes);
+        slot->occupied = false;
+        slot->layout = VK_NULL_HANDLE;
+        slot->vert_entry = NULL;
+        slot->frag_entry = NULL;
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    slot->bindings        = bindings;
+    slot->binding_count   = desc->vertex_layout_count;
+    slot->attributes      = attributes;
+    slot->attribute_count = total_attributes;
+
+    slot->topology = ne_topology_to_vk(desc->topology);
+    slot->blend    = blend_attachment;
+    slot->pipeline = VK_NULL_HANDLE;
+
+    return (NEPipelineHandle){ .id = slot_index + 1 };
+}
+
+/* ── ne_pipeline_destroy ─────────────────────────────────────────────────── */
+
+void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
+    if (!renderer || !ne_pipeline_handle_valid(handle)) {
+        return;
+    }
+
+    const uint32_t index = handle.id - 1;
+    if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
+        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)",
+                    handle.id);
+        return;
+    }
+
+    NEVulkanPipelineSlot *slot = &renderer->pipelines[index];
+
+    if (slot->pipeline != VK_NULL_HANDLE && renderer->fns.vkDestroyPipeline) {
+        renderer->fns.vkDestroyPipeline(renderer->device, slot->pipeline, NULL);
+        slot->pipeline = VK_NULL_HANDLE;
+    }
+
+    if (slot->layout != VK_NULL_HANDLE && renderer->fns.vkDestroyPipelineLayout) {
+        renderer->fns.vkDestroyPipelineLayout(renderer->device, slot->layout, NULL);
+        slot->layout = VK_NULL_HANDLE;
+    }
+
+    free(slot->vert_entry);
+    free(slot->frag_entry);
+    free(slot->bindings);
+    free(slot->attributes);
+
+    slot->vert_entry   = NULL;
+    slot->frag_entry   = NULL;
+    slot->bindings     = NULL;
+    slot->attributes   = NULL;
+    slot->vert_module  = VK_NULL_HANDLE;
+    slot->frag_module  = VK_NULL_HANDLE;
+    slot->occupied     = false;
+
+    if (renderer->pipeline_count > 0) {
+        renderer->pipeline_count--;
+    }
+}
+
+/* ── Compute pipeline stubs ──────────────────────────────────────────────── */
+
+NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
+                                                   const NEComputePipelineDesc *desc) {
+    (void)renderer;
+    (void)desc;
+    NE_LOG_WARN("ne_compute_pipeline_create: compute pipelines not yet implemented on Vulkan");
+    return NE_COMPUTE_PIPELINE_HANDLE_NULL;
+}
+
+void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle handle) {
+    (void)renderer;
+    (void)handle;
 }
