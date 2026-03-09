@@ -1868,9 +1868,9 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     VkViewport viewport;
     memset(&viewport, 0, sizeof(viewport));
     viewport.x        = 0.0f;
-    viewport.y        = 0.0f;
+    viewport.y        = (float)surface->sc.extent.height;
     viewport.width    = (float)surface->sc.extent.width;
-    viewport.height   = (float)surface->sc.extent.height;
+    viewport.height   = -(float)surface->sc.extent.height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
