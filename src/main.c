@@ -41,7 +41,11 @@ int main(void) {
     }
 
     NEWindow *window = ne_window_create(app, &(NEWindowDesc){
+#if TESTING_ENABLED
                                                  .title = "NanoEngine2 — Tests",
+#else
+                                                 .title = "NanoEngine2",
+#endif
                                                  .x = 100,
                                                  .y = 100,
                                                  .width = 800,
@@ -61,6 +65,7 @@ int main(void) {
     };
     ne_window_set_callbacks(window, &callbacks, NULL);
 
+#if TESTING_ENABLED
     /* ── Run Tests ─────────────────────────────────────────────────────── */
 
     bool test_passed = test_buffer(app, window);
@@ -72,4 +77,24 @@ int main(void) {
 
     NE_LOG_INFO("application shutdown complete");
     return test_passed ? 0 : 1;
+
+#else /* !TESTING_ENABLED */
+    /* ── Main Loop (placeholder) ───────────────────────────────────────── */
+
+    NE_LOG_INFO("NanoEngine2 running in normal mode (no tests enabled)");
+    NE_LOG_INFO("press Escape to quit");
+
+    while (ne_window_is_open(window) && ne_app_poll_events(app)) {
+        /* Main loop - rendering will go here */
+    }
+
+    /* ── Cleanup ───────────────────────────────────────────────────────── */
+
+    ne_window_destroy(window);
+    ne_app_destroy(app);
+
+    NE_LOG_INFO("application shutdown complete");
+    return 0;
+
+#endif /* TESTING_ENABLED */
 }

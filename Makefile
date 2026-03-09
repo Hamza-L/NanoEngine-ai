@@ -13,6 +13,7 @@ EXE_EXT :=
 endif
 
 OUTPUT := $(BUILD_DIR)/$(APP_NAME)$(EXE_EXT)
+TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 
 # Dependency makefiles may be included before targets are defined; make sure the
 # default goal stays consistent.
@@ -23,8 +24,11 @@ OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
-SRC_C := src/main.c src/ne_log.c src/ne_file.c src/test_buffer.c
+SRC_C := src/main.c src/ne_log.c src/ne_file.c
 SRC_M :=
+
+# Test sources (only compiled when TESTING_ENABLED=1)
+SRC_C_TEST := src/test_buffer.c
 
 # Platform makefiles can append to this to force prerequisites before any
 # object is compiled (e.g. downloaded headers).
@@ -46,7 +50,17 @@ $(error Unsupported platform for step 1. Add Linux target if needed)
 endif
 endif
 
-OBJ_C := $(SRC_C:%.c=$(BUILD_DIR)/%.$(OBJ_EXT))
+# Determine source files and compiler flags based on build mode
+# Check if 'test' is in the make goals
+ifeq ($(filter test,$(MAKECMDGOALS)),test)
+SRC_C_ALL := $(SRC_C) $(SRC_C_TEST)
+CFLAGS += -DTESTING_ENABLED=1
+else
+SRC_C_ALL := $(SRC_C)
+CFLAGS += -DTESTING_ENABLED=0
+endif
+
+OBJ_C := $(SRC_C_ALL:%.c=$(BUILD_DIR)/%.$(OBJ_EXT))
 OBJ_M := $(SRC_M:%.m=$(BUILD_DIR)/%.$(OBJ_EXT))
 OBJS := $(OBJ_C) $(OBJ_M)
 
@@ -55,12 +69,17 @@ DEPS := $(OBJS:.$(OBJ_EXT)=.d)
 # Automatically include generated dependency files (if present).
 -include $(DEPS)
 
-.PHONY: all clean $(APP_NAME)
+.PHONY: all clean test $(APP_NAME)
 
 # Default build (same command on every platform):
 #   make
 # builds the actual output file (with .exe on Windows).
 all: $(APP_NAME)
+
+# Test build target:
+#   make test
+# builds with TESTING_ENABLED=1 and test sources included.
+test: $(TEST_OUTPUT)
 
 # User-facing target without extension.
 $(APP_NAME): $(OUTPUT)
@@ -69,6 +88,11 @@ $(APP_NAME): $(OUTPUT)
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
 	@$(CC) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
+
+# Test executable target
+$(TEST_OUTPUT): $(BUILD_DIR) $(OBJS)
+	@echo LINK $(TEST_OUTPUT)
+	@$(CC) $(OBJS) -o $(TEST_OUTPUT) $(LDFLAGS)
 
 $(BUILD_DIR):
 	@$(call mkdir_p,$(BUILD_DIR))

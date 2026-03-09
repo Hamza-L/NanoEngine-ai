@@ -8,6 +8,8 @@
 #include <stdint.h>
 #include <string.h>
 
+#if TESTING_ENABLED
+
 /* ── Test Data ──────────────────────────────────────────────────────────── */
 
 typedef struct Vertex {
@@ -254,3 +256,6 @@ bool test_buffer(NEApp *app, NEWindow *window) {
 
     return all_passed;
 }
+
+#endif /* TESTING_ENABLED */
+
