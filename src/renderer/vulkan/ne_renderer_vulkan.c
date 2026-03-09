@@ -23,7 +23,7 @@
  * Including the header without linking is safe: the compiler never emits a
  * direct call to a shaderc symbol, so the linker has nothing to resolve.
  */
-#include <shaderc/shaderc.h>
+#include "shaderc/shaderc.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -2162,7 +2162,7 @@ static bool ne_vk_shaderc_load(NERenderer *r) {
     }
 
 #define NE_LOAD_SHADERC(field, symbol) \
-    sc->field = (ne_fn_##field)GetProcAddress(sc->lib, #symbol); \
+    sc->field = (ne_fn_shaderc_##field)GetProcAddress(sc->lib, #symbol); \
     if (!sc->field) { \
         NE_LOG_ERROR("ne_vk_shaderc_load: missing symbol '%s' in shaderc_shared.dll", #symbol); \
         FreeLibrary(sc->lib); sc->lib = NULL; return false; \
