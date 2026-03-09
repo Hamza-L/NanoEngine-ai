@@ -13,6 +13,7 @@
 #include "ne_log.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
+#include "ne_renderer_shader.h"
 #include "ne_window.h"
 
 #include <stdbool.h>
@@ -99,6 +100,10 @@ typedef struct NEVulkanFns {
     PFN_vkUnmapMemory vkUnmapMemory;
     PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
     PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
+
+    /* Shader management */
+    PFN_vkCreateShaderModule vkCreateShaderModule;
+    PFN_vkDestroyShaderModule vkDestroyShaderModule;
 } NEVulkanFunctions;
 
 enum {
@@ -115,6 +120,15 @@ typedef struct NEVulkanBufferSlot {
     VkBuffer buffer;
     VkDeviceMemory memory;
 } NEVulkanBufferSlot;
+
+/* ── Shader resource pool ───────────────────────────────────────────────── */
+
+typedef struct NEVulkanShaderSlot {
+    bool occupied;
+    uint32_t stage;             /* NEShaderStage value */
+    VkShaderModule module;
+    char *entry_point;          /* strdup'd entry point name */
+} NEVulkanShaderSlot;
 
 typedef struct NESwapchain {
     VkSwapchainKHR swapchain;
@@ -196,6 +210,11 @@ struct NERenderer {
     /* uint32_t descriptor_pool_size;            Placeholder: pool capacity  */
     /* VkDescriptorSetLayout *layout_cache;     Placeholder: reuse layouts  */
     /* uint32_t layout_cache_count;             Placeholder: active layouts */
+
+    /* Shader resource pool */
+    NEVulkanShaderSlot *shaders;
+    uint32_t shader_count;
+    uint32_t shader_cap;
 
     struct NERenderSurface *surfaces;
 };
@@ -479,12 +498,17 @@ static bool ne_vk_load_device_fns(NERenderer *r) {
     f->vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)ne_vk_get_device(f, r->device, "vkFlushMappedMemoryRanges");
     f->vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)ne_vk_get_device(f, r->device, "vkCmdCopyBuffer");
 
+    /* Shader management functions */
+    f->vkCreateShaderModule = (PFN_vkCreateShaderModule)ne_vk_get_device(f, r->device, "vkCreateShaderModule");
+    f->vkDestroyShaderModule = (PFN_vkDestroyShaderModule)ne_vk_get_device(f, r->device, "vkDestroyShaderModule");
+
     return f->vkDestroyDevice && f->vkGetDeviceQueue && f->vkCreateSwapchainKHR && f->vkGetSwapchainImagesKHR &&
            f->vkAcquireNextImageKHR && f->vkQueueSubmit && f->vkQueuePresentKHR && f->vkCreateSemaphore && f->vkCreateFence &&
            f->vkWaitForFences && f->vkResetFences && f->vkCreateCommandPool && f->vkResetCommandBuffer && f->vkAllocateCommandBuffers &&
            f->vkBeginCommandBuffer && f->vkEndCommandBuffer && f->vkCmdPipelineBarrier && f->vkCmdClearColorImage &&
            f->vkCreateBuffer && f->vkDestroyBuffer && f->vkGetBufferMemoryRequirements && f->vkAllocateMemory && f->vkFreeMemory && f->vkBindBufferMemory &&
-           f->vkMapMemory && f->vkUnmapMemory && f->vkFlushMappedMemoryRanges && f->vkCmdCopyBuffer;
+           f->vkMapMemory && f->vkUnmapMemory && f->vkFlushMappedMemoryRanges && f->vkCmdCopyBuffer &&
+           f->vkCreateShaderModule && f->vkDestroyShaderModule;
 }
 
 static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
@@ -1246,6 +1270,20 @@ void ne_renderer_destroy(NERenderer *r) {
     r->buffers = NULL;
     r->buffer_count = 0;
     r->buffer_cap = 0;
+
+    /* Destroy all live shaders. */
+    for (uint32_t i = 0; i < r->shader_cap; i++) {
+        if (r->shaders[i].occupied) {
+            if (r->shaders[i].module != VK_NULL_HANDLE && r->fns.vkDestroyShaderModule) {
+                r->fns.vkDestroyShaderModule(r->device, r->shaders[i].module, NULL);
+            }
+            free(r->shaders[i].entry_point);
+        }
+    }
+    free(r->shaders);
+    r->shaders = NULL;
+    r->shader_count = 0;
+    r->shader_cap = 0;
 
     /* Destroy staging buffer and transfer command pool. */
     if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
