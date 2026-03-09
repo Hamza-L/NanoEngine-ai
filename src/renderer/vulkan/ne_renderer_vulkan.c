@@ -13,6 +13,7 @@
 #include "ne_log.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
+#include "ne_renderer_pass.h"
 #include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
@@ -370,6 +371,8 @@ struct NERenderSurface {
  */
 struct NERenderPass {
     NERenderSurface *surface;
+    VkCommandBuffer cmd;              /* live command buffer for this frame */
+    VkPipelineLayout bound_layout;    /* layout of currently bound pipeline (for push constants) */
 };
 
 /* Per-frame render pass instance (valid between begin_frame / end_frame). */
@@ -1429,42 +1432,12 @@ static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
     return true;
 }
 
-static void ne_vk_transition_image(NERenderer *r, VkCommandBuffer cmd, VkImage img, VkImageLayout old_layout, VkImageLayout new_layout) {
-    VkImageMemoryBarrier barrier;
-    memset(&barrier, 0, sizeof(barrier));
-    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
-    barrier.oldLayout = old_layout;
-    barrier.newLayout = new_layout;
-    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-    barrier.image = img;
-    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    barrier.subresourceRange.baseMipLevel = 0;
-    barrier.subresourceRange.levelCount = 1;
-    barrier.subresourceRange.baseArrayLayer = 0;
-    barrier.subresourceRange.layerCount = 1;
-
-    VkPipelineStageFlags src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    VkPipelineStageFlags dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-
-    if (old_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        src_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else {
-        barrier.srcAccessMask = 0;
-        src_stage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
-    }
-
-    if (new_layout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
-        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        dst_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-    } else {
-        barrier.dstAccessMask = 0;
-        dst_stage = VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
-    }
-
-    r->fns.vkCmdPipelineBarrier(cmd, src_stage, dst_stage, 0, 0, NULL, 0, NULL, 1, &barrier);
-}
+/*
+ * ne_vk_transition_image() was removed — render pass automatic layout
+ * transitions replaced the manual clear-based path.  The PFN for
+ * vkCmdPipelineBarrier is still loaded for future use (e.g. compute
+ * dispatch barriers, off-screen render target transitions).
+ */
 
 NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     (void)app;
@@ -1870,33 +1843,51 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
-    VkImage img = surface->sc.images[image_index];
+    /* ── Begin render pass (clear via loadOp, layout transitions automatic) ── */
 
-    /* Transition to TRANSFER_DST_OPTIMAL, clear, then transition back to PRESENT. */
-    const VkImageLayout old_layout = surface->sc.image_layouts[image_index];
-    ne_vk_transition_image(r, cmd, img, old_layout, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    VkClearValue clear_value;
+    memset(&clear_value, 0, sizeof(clear_value));
+    clear_value.color.float32[0] = surface->clear_color[0];
+    clear_value.color.float32[1] = surface->clear_color[1];
+    clear_value.color.float32[2] = surface->clear_color[2];
+    clear_value.color.float32[3] = surface->clear_color[3];
 
-    VkClearColorValue cc = {{surface->clear_color[0], surface->clear_color[1], surface->clear_color[2], surface->clear_color[3]}};
-    VkImageSubresourceRange range;
-    memset(&range, 0, sizeof(range));
-    range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-    range.baseMipLevel = 0;
-    range.levelCount = 1;
-    range.baseArrayLayer = 0;
-    range.layerCount = 1;
+    VkRenderPassBeginInfo rpbi;
+    memset(&rpbi, 0, sizeof(rpbi));
+    rpbi.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+    rpbi.renderPass        = surface->render_pass;
+    rpbi.framebuffer       = surface->sc.framebuffers[image_index];
+    rpbi.renderArea.offset = (VkOffset2D){0, 0};
+    rpbi.renderArea.extent = surface->sc.extent;
+    rpbi.clearValueCount   = 1;
+    rpbi.pClearValues      = &clear_value;
 
-    r->fns.vkCmdClearColorImage(cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, &cc, 1, &range);
+    r->fns.vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
-    ne_vk_transition_image(r, cmd, img, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
+    /* Set default viewport and scissor to match the surface extent. */
+    VkViewport viewport;
+    memset(&viewport, 0, sizeof(viewport));
+    viewport.x        = 0.0f;
+    viewport.y        = 0.0f;
+    viewport.width    = (float)surface->sc.extent.width;
+    viewport.height   = (float)surface->sc.extent.height;
+    viewport.minDepth = 0.0f;
+    viewport.maxDepth = 1.0f;
 
-    vr = r->fns.vkEndCommandBuffer(cmd);
-    if (vr != VK_SUCCESS) {
-        return NULL;
-    }
+    r->fns.vkCmdSetViewport(cmd, 0, 1, &viewport);
+
+    VkRect2D scissor;
+    memset(&scissor, 0, sizeof(scissor));
+    scissor.offset = (VkOffset2D){0, 0};
+    scissor.extent = surface->sc.extent;
+
+    r->fns.vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     surface->sc.image_layouts[image_index] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
-    g_active_pass.surface = surface;
+    g_active_pass.surface      = surface;
+    g_active_pass.cmd          = cmd;
+    g_active_pass.bound_layout = VK_NULL_HANDLE;
     return &g_active_pass;
 }
 
@@ -1910,11 +1901,28 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
+    /* ── Close the render pass and command buffer ────────────────────── */
+
+    VkCommandBuffer cmd = pass->cmd;
+    r->fns.vkCmdEndRenderPass(cmd);
+
+    VkResult vr = r->fns.vkEndCommandBuffer(cmd);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkEndCommandBuffer failed (vr=%d)", (int)vr);
+        pass->surface      = NULL;
+        pass->cmd          = VK_NULL_HANDLE;
+        pass->bound_layout = VK_NULL_HANDLE;
+        surface->wants_swapchain_recreate = true;
+        return;
+    }
+
+    /* ── Submit and present ──────────────────────────────────────────── */
+
     const uint32_t image_index = surface->sc.acquired_image_index;
 
     const uint32_t frame = surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
-    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
     VkSubmitInfo si;
     memset(&si, 0, sizeof(si));
@@ -1937,7 +1945,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &sem_render_finished;
 
-    VkResult vr = r->fns.vkQueueSubmit(r->queue, 1, &si, surface->sc.fences_in_flight[frame]);
+    vr = r->fns.vkQueueSubmit(r->queue, 1, &si, surface->sc.fences_in_flight[frame]);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit failed (vr=%d)", (int)vr);
         surface->wants_swapchain_recreate = true;
@@ -1963,7 +1971,9 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
 
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
-    pass->surface = NULL;
+    pass->surface      = NULL;
+    pass->cmd          = VK_NULL_HANDLE;
+    pass->bound_layout = VK_NULL_HANDLE;
 }
 
 /* ========================================================================
@@ -2725,7 +2735,7 @@ static bool ne_vk_pipeline_compile(NERenderer *r, NEVulkanPipelineSlot *slot,
     memset(&rasterization, 0, sizeof(rasterization));
     rasterization.sType       = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
     rasterization.polygonMode = VK_POLYGON_MODE_FILL;
-    rasterization.cullMode    = VK_CULL_MODE_BACK_BIT;
+    rasterization.cullMode    = VK_CULL_MODE_NONE;
     rasterization.frontFace   = VK_FRONT_FACE_COUNTER_CLOCKWISE;
     rasterization.lineWidth   = 1.0f;
 
@@ -3019,4 +3029,196 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
 void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle handle) {
     (void)renderer;
     (void)handle;
+}
+
+/* ========================================================================
+ * Render Pass Commands (Graphics)
+ * ======================================================================== */
+
+void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) {
+    if (!pass || !pass->surface || !pass->cmd) {
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    if (!r || !ne_pipeline_handle_valid(pipeline)) {
+        NE_LOG_WARN("ne_render_pass_set_pipeline: invalid pass or pipeline handle");
+        return;
+    }
+
+    const uint32_t index = pipeline.id - 1;
+    if (index >= r->pipeline_cap || !r->pipelines[index].occupied) {
+        NE_LOG_WARN("ne_render_pass_set_pipeline: pipeline handle (id=%u) is invalid or destroyed",
+                    pipeline.id);
+        return;
+    }
+
+    NEVulkanPipelineSlot *slot = &r->pipelines[index];
+
+    /* Deferred compilation: build the VkPipeline on first use. */
+    if (slot->needs_compile) {
+        if (!ne_vk_pipeline_compile(r, slot, pass->surface->render_pass)) {
+            /* compilation_failed is already set inside ne_vk_pipeline_compile. */
+            return;
+        }
+    }
+
+    if (slot->compilation_failed || slot->pipeline == VK_NULL_HANDLE) {
+        return;
+    }
+
+    r->fns.vkCmdBindPipeline(pass->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, slot->pipeline);
+    pass->bound_layout = slot->layout;
+}
+
+void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot,
+                                      NEBufferHandle buffer) {
+    if (!pass || !pass->surface || !pass->cmd) {
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    if (!r || !ne_buffer_handle_valid(buffer)) {
+        return;
+    }
+
+    const uint32_t buf_index = buffer.id - 1;
+    if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
+        NE_LOG_WARN("ne_render_pass_set_vertex_buffer: buffer handle (id=%u) is invalid or destroyed",
+                    buffer.id);
+        return;
+    }
+
+    VkBuffer vk_buffer = r->buffers[buf_index].buffer;
+    VkDeviceSize offset = 0;
+
+    r->fns.vkCmdBindVertexBuffers(pass->cmd, slot, 1, &vk_buffer, &offset);
+}
+
+void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
+                                     NEIndexType type) {
+    if (!pass || !pass->surface || !pass->cmd) {
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    if (!r || !ne_buffer_handle_valid(buffer)) {
+        return;
+    }
+
+    const uint32_t buf_index = buffer.id - 1;
+    if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
+        NE_LOG_WARN("ne_render_pass_set_index_buffer: buffer handle (id=%u) is invalid or destroyed",
+                    buffer.id);
+        return;
+    }
+
+    VkBuffer vk_buffer = r->buffers[buf_index].buffer;
+    VkIndexType vk_type = (type == NE_INDEX_TYPE_UINT32) ? VK_INDEX_TYPE_UINT32
+                                                         : VK_INDEX_TYPE_UINT16;
+
+    r->fns.vkCmdBindIndexBuffer(pass->cmd, vk_buffer, 0, vk_type);
+}
+
+void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
+                                     uint32_t slot, const void *data, uint32_t size) {
+    if (!pass || !pass->surface || !pass->cmd || !data || size == 0) {
+        return;
+    }
+
+    if (pass->bound_layout == VK_NULL_HANDLE) {
+        NE_LOG_WARN("ne_render_pass_set_uniform_data: no pipeline bound (call set_pipeline first)");
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    if (!r) {
+        return;
+    }
+
+    VkShaderStageFlags stage_flags;
+    switch (stage) {
+    case NE_SHADER_STAGE_VERTEX:   stage_flags = VK_SHADER_STAGE_VERTEX_BIT;   break;
+    case NE_SHADER_STAGE_FRAGMENT: stage_flags = VK_SHADER_STAGE_FRAGMENT_BIT; break;
+    default:
+        NE_LOG_WARN("ne_render_pass_set_uniform_data: unsupported shader stage (%d)", (int)stage);
+        return;
+    }
+
+    /*
+     * Push constant offset = 0.  The 'slot' parameter is a Metal-ism (buffer
+     * index for setVertexBytes/setFragmentBytes).  Vulkan push constants are a
+     * flat byte range; we always write from offset 0.
+     */
+    (void)slot;
+
+    if (size > 128) {
+        NE_LOG_WARN("ne_render_pass_set_uniform_data: size (%u) exceeds guaranteed push constant "
+                    "minimum (128 bytes)", (unsigned)size);
+    }
+
+    r->fns.vkCmdPushConstants(pass->cmd, pass->bound_layout, stage_flags, 0, size, data);
+}
+
+void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex,
+                         uint32_t vertex_count) {
+    if (!pass || !pass->surface || !pass->cmd || vertex_count == 0) {
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    r->fns.vkCmdDraw(pass->cmd, vertex_count, 1, first_vertex, 0);
+}
+
+void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count,
+                                 uint32_t first_index, int32_t vertex_offset) {
+    if (!pass || !pass->surface || !pass->cmd || index_count == 0) {
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    r->fns.vkCmdDrawIndexed(pass->cmd, index_count, 1, first_index, vertex_offset, 0);
+}
+
+/* ========================================================================
+ * Compute Pass Stubs
+ * ======================================================================== */
+
+NEComputePass *ne_render_pass_begin_compute(NERenderPass *pass) {
+    (void)pass;
+    NE_LOG_WARN("ne_render_pass_begin_compute: compute passes not yet implemented on Vulkan");
+    return NULL;
+}
+
+void ne_render_pass_end_compute(NERenderPass *pass, NEComputePass *compute) {
+    (void)pass;
+    (void)compute;
+}
+
+void ne_compute_pass_set_pipeline(NEComputePass *pass, NEComputePipelineHandle pipeline) {
+    (void)pass;
+    (void)pipeline;
+}
+
+void ne_compute_pass_set_storage_buffer(NEComputePass *pass, uint32_t slot,
+                                        NEBufferHandle buffer) {
+    (void)pass;
+    (void)slot;
+    (void)buffer;
+}
+
+void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint32_t slot,
+                                      const void *data, uint32_t size) {
+    (void)pass;
+    (void)slot;
+    (void)data;
+    (void)size;
+}
+
+void ne_compute_pass_dispatch(NEComputePass *pass, uint32_t group_count_x,
+                              uint32_t group_count_y, uint32_t group_count_z) {
+    (void)pass;
+    (void)group_count_x;
+    (void)group_count_y;
+    (void)group_count_z;
 }
