@@ -23,7 +23,7 @@ OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
-SRC_C := src/main.c src/ne_log.c
+SRC_C := src/main.c src/ne_log.c src/ne_file.c
 SRC_M :=
 
 # Platform makefiles can append to this to force prerequisites before any

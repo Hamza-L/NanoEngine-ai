@@ -9,6 +9,7 @@
 - [Application (`ne_app.h`)](#application)
 - [Window (`ne_window.h`)](#window)
 - [Logging (`ne_log.h`)](#logging)
+- [File I/O (`ne_file.h`)](#file-io)
 - [Renderer Core (`ne_renderer.h`)](#renderer-core)
 - [Buffers (`ne_renderer_buffer.h`)](#buffers)
 - [Shaders (`ne_renderer_shader.h`)](#shaders)
@@ -261,6 +262,26 @@ Same as above, with a `va_list`.
 In debug builds (`NDEBUG` not defined): logs a FATAL message with file, line, and function name, then calls `abort()`. In release builds: expands to `((void)0)`.
 
 Override with `-DNE_ENABLE_ASSERTS=0` or `-DNE_ENABLE_ASSERTS=1`.
+
+---
+
+<a id="file-io"></a>
+## File I/O — `ne_file.h`
+
+Simple file read/write utilities. Designed for loading shader source and bytecode at runtime.
+
+### Functions
+
+#### `void *ne_file_read(const char *path, size_t *out_size)`
+Reads an entire file into a heap-allocated buffer. The buffer is always null-terminated so it can be used directly as a C string (useful for shader source). The actual file size (excluding the null terminator) is written to `out_size` when non-NULL.
+
+Returns `NULL` on failure. Free with `ne_file_free()`.
+
+#### `bool ne_file_write(const char *path, const void *data, size_t size)`
+Writes `size` bytes of `data` to a file, replacing any existing contents. Returns `true` on success.
+
+#### `void ne_file_free(void *data)`
+Frees a buffer previously returned by `ne_file_read()`.
 
 ---
 

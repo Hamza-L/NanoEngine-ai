@@ -21,6 +21,7 @@ The engine is organized into **8 public modules**, each corresponding to a heade
 │  ne_app.h          Lifecycle, event loop, quit control          │
 │  ne_window.h       Window creation, input events, callbacks     │
 │  ne_log.h          Logging, sinks, assertions                   │
+│  ne_file.h         File I/O (shader loading, asset reading)     │
 └─────────────────────┬───────────────────────────────────────────┘
                       │ uses
 ┌─────────────────────▼───────────────────────────────────────────┐
@@ -54,6 +55,7 @@ ne_renderer.h          (standalone, forward-declares NEApp/NEWindow)
 ne_app.h               (standalone)
 ne_window.h            (standalone, forward-declares NEApp)
 ne_log.h               (standalone)
+ne_file.h              (standalone)
 ```
 
 ---
@@ -64,6 +66,7 @@ ne_log.h               (standalone)
 NanoEngine2/
 ├── include/                    Public C API headers
 │   ├── ne_app.h
+│   ├── ne_file.h
 │   ├── ne_log.h
 │   ├── ne_renderer.h
 │   ├── ne_renderer_buffer.h
@@ -73,6 +76,7 @@ NanoEngine2/
 │   └── ne_window.h
 ├── src/
 │   ├── main.c                  Entry point / demo application
+│   ├── ne_file.c               File I/O utilities (cross-platform)
 │   ├── ne_log.c                Logging implementation (cross-platform)
 │   ├── platform/               Windowing backends
 │   │   ├── macos/
