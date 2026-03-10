@@ -18,15 +18,6 @@
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
 
-/*
- * shaderc C header — included for type definitions and enum constants only.
- * We do NOT link against shaderc_shared.lib; all functions are resolved at
- * runtime via GetProcAddress so that the DLL is optional at link time.
- * Including the header without linking is safe: the compiler never emits a
- * direct call to a shaderc symbol, so the linker has nothing to resolve.
- */
-#include "shaderc/shaderc.h"
-
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
@@ -152,56 +143,6 @@ enum {
     NE_VK_POOL_INITIAL_CAP = 16,
 };
 
-/* ── shaderc dynamic-load state ─────────────────────────────────────────── */
-
-/*
- * Function pointer typedefs for the shaderc C API functions we need.
- * Defined here rather than relying on the header's own declarations so that
- * the function pointer members of NEShaderc are unambiguously typed and
- * independent of any SHADERC_EXPORT decoration the header may apply.
- */
-typedef shaderc_compiler_t          (*ne_fn_shaderc_compiler_initialize)(void);
-typedef void                        (*ne_fn_shaderc_compiler_release)(shaderc_compiler_t);
-typedef shaderc_compile_options_t   (*ne_fn_shaderc_compile_options_initialize)(void);
-typedef void                        (*ne_fn_shaderc_compile_options_release)(shaderc_compile_options_t);
-typedef void                        (*ne_fn_shaderc_compile_options_set_optimization_level)(
-                                        shaderc_compile_options_t, shaderc_optimization_level);
-typedef shaderc_compilation_result_t (*ne_fn_shaderc_compile_into_spv)(
-                                        shaderc_compiler_t,
-                                        const char *, size_t,
-                                        shaderc_shader_kind,
-                                        const char *, const char *,
-                                        shaderc_compile_options_t);
-typedef void                         (*ne_fn_shaderc_result_release)(shaderc_compilation_result_t);
-typedef shaderc_compilation_status   (*ne_fn_shaderc_result_get_compilation_status)(shaderc_compilation_result_t);
-typedef const char                  *(*ne_fn_shaderc_result_get_error_message)(shaderc_compilation_result_t);
-typedef size_t                       (*ne_fn_shaderc_result_get_length)(shaderc_compilation_result_t);
-typedef const char                  *(*ne_fn_shaderc_result_get_bytes)(shaderc_compilation_result_t);
-
-typedef struct NEShaderc {
-    HMODULE lib;
-    bool    load_attempted; /* true after the first load attempt, success or not */
-
-    ne_fn_shaderc_compiler_initialize              compiler_initialize;
-    ne_fn_shaderc_compiler_release                 compiler_release;
-    ne_fn_shaderc_compile_options_initialize        compile_options_initialize;
-    ne_fn_shaderc_compile_options_release           compile_options_release;
-    ne_fn_shaderc_compile_options_set_optimization_level compile_options_set_optimization_level;
-    ne_fn_shaderc_compile_into_spv                 compile_into_spv;
-    ne_fn_shaderc_result_release                   result_release;
-    ne_fn_shaderc_result_get_compilation_status    result_get_compilation_status;
-    ne_fn_shaderc_result_get_error_message         result_get_error_message;
-    ne_fn_shaderc_result_get_length                result_get_length;
-    ne_fn_shaderc_result_get_bytes                 result_get_bytes;
-
-    /*
-     * Persistent compiler instance.  shaderc_compiler_t is documented as
-     * thread-safe and intended to be long-lived; we create it once and keep
-     * it alive for the lifetime of the renderer.
-     */
-    shaderc_compiler_t compiler;
-} NEShaderc;
-
 /* ── Buffer resource pool ───────────────────────────────────────────────── */
 
 typedef struct NEVulkanBufferSlot {
@@ -283,6 +224,11 @@ typedef struct NESwapchain {
     uint32_t acquired_image_index;
 } NESwapchain;
 
+typedef struct NEQueuePresentCommand{
+    NERenderSurface *surface;
+    uint32_t image_index;
+} NEQueuePresentCommand;
+
 struct NERenderer {
     HMODULE vulkan_lib;
     VkInstance instance;
@@ -305,9 +251,12 @@ struct NERenderer {
     void *staging_mapped;
     uint32_t staging_size;
 
+    NEQueuePresentCommand queueDeferredPresentCommand;
+
     /* Transfer command pool for staging uploads */
     VkCommandPool transfer_cmd_pool;
     VkCommandBuffer transfer_cmd;
+
 
     /* ─── Descriptor Set Infrastructure (foundation for future GPU binding) ─── */
     /* 
@@ -343,7 +292,6 @@ struct NERenderer {
     uint32_t pipeline_cap;
 
     /* Runtime GLSL → SPIR-V compilation via shaderc (loaded dynamically). */
-    NEShaderc shaderc;
     NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
 
     struct NERenderSurface *surfaces;
@@ -363,6 +311,10 @@ struct NERenderSurface {
 
     struct NERenderSurface *next;
 };
+
+
+// forwward declaration for present callback
+void ne_vk_present();
 
 /**
  * NERenderPass is currently backed by the surface itself.
@@ -463,7 +415,7 @@ static bool ne_vk_has_layer(const NEVulkanFunctions *fns, const char *layer_name
     return found;
 }
 
-static void ne_vk_sc_cleanup(NERenderer *r, NESwapchain *sc) {
+static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
     if (!r || !sc) {
         return;
     }
@@ -869,7 +821,7 @@ static VkSurfaceFormatKHR ne_vk_choose_surface_format(const VkSurfaceFormatKHR *
 
 static VkPresentModeKHR ne_vk_choose_present_mode(const VkPresentModeKHR *modes, uint32_t count, bool vsync) {
     /* FIFO is guaranteed. */
-    VkPresentModeKHR chosen = VK_PRESENT_MODE_FIFO_KHR;
+    VkPresentModeKHR chosen = VK_PRESENT_MODE_MAILBOX_KHR;
 
     if (!vsync) {
         for (uint32_t i = 0; i < count; i++) {
@@ -1137,7 +1089,7 @@ static bool ne_vk_create_render_pass(NERenderSurface *surface, VkFormat format) 
     return true;
 }
 
-static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
+static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     if (!surface || !surface->renderer) {
         return false;
     }
@@ -1157,7 +1109,7 @@ static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
         return false;
     }
 
-    ne_vk_sc_cleanup(r, &surface->sc);
+    ne_vk_swapchain_cleanup(r, &surface->sc);
 
     VkSurfaceCapabilitiesKHR caps;
     VkResult vr = r->fns.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->phys, surface->surface, &caps);
@@ -1245,10 +1197,9 @@ static bool ne_vk_sc_create(NERenderSurface *surface, bool vsync) {
     sci.imageColorSpace = chosen_format.colorSpace;
     sci.imageExtent = extent;
     sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
     sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    sci.preTransform = (caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR) ? VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR
-                                                                                          : caps.currentTransform;
+    sci.preTransform = caps.currentTransform;
     sci.compositeAlpha = composite_alpha;
     sci.presentMode = chosen_mode;
     sci.clipped = VK_TRUE;
@@ -1539,7 +1490,7 @@ void ne_renderer_destroy(NERenderer *r) {
     while (s) {
         struct NERenderSurface *next = s->next;
 
-        ne_vk_sc_cleanup(r, &s->sc);
+        ne_vk_swapchain_cleanup(r, &s->sc);
 
         if (s->render_pass != VK_NULL_HANDLE && r->fns.vkDestroyRenderPass) {
             r->fns.vkDestroyRenderPass(r->device, s->render_pass, NULL);
@@ -1608,16 +1559,6 @@ void ne_renderer_destroy(NERenderer *r) {
     r->pipelines = NULL;
     r->pipeline_count = 0;
     r->pipeline_cap = 0;
-
-    /* Release the shaderc compiler and unload the DLL. */
-    if (r->shaderc.compiler && r->shaderc.compiler_release) {
-        r->shaderc.compiler_release(r->shaderc.compiler);
-        r->shaderc.compiler = NULL;
-    }
-    if (r->shaderc.lib) {
-        FreeLibrary(r->shaderc.lib);
-        r->shaderc.lib = NULL;
-    }
 
     /* Destroy staging buffer and transfer command pool. */
     if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
@@ -1724,6 +1665,8 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
     surface->next = r->surfaces;
     r->surfaces = surface;
 
+    ne_set_window_present_dispatch(window, ne_vk_present);
+
     return surface;
 }
 
@@ -1743,7 +1686,7 @@ void ne_renderer_destroy_surface(NERenderer *r, NERenderSurface *surface) {
         pp = &(*pp)->next;
     }
 
-    ne_vk_sc_cleanup(r, &surface->sc);
+    ne_vk_swapchain_cleanup(r, &surface->sc);
 
     if (surface->render_pass != VK_NULL_HANDLE) {
         r->fns.vkDestroyRenderPass(r->device, surface->render_pass, NULL);
@@ -1781,10 +1724,13 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
+    // necessary to trigger a surface re-draw
+    ne_window_invalidate(surface->window);
+
     const bool vsync = true; /* surface desc vsync is not stored yet; treat as true for now. */
 
     if (surface->wants_swapchain_recreate || surface->sc.swapchain == VK_NULL_HANDLE) {
-        if (!ne_vk_sc_create(surface, vsync)) {
+        if (!ne_vk_swapchain_create(surface, vsync)) {
             return NULL;
         }
     }
@@ -1840,7 +1786,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     VkCommandBufferBeginInfo bi;
     memset(&bi, 0, sizeof(bi));
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
-    bi.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+    bi.flags = 0;
 
     vr = r->fns.vkBeginCommandBuffer(cmd, &bi);
     if (vr != VK_SUCCESS) {
@@ -1956,6 +1902,9 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
+    r->queueDeferredPresentCommand.image_index = image_index;
+    r->queueDeferredPresentCommand.surface = surface;
+
     VkPresentInfoKHR pi;
     memset(&pi, 0, sizeof(pi));
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1965,7 +1914,39 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     pi.pSwapchains = &surface->sc.swapchain;
     pi.pImageIndices = &image_index;
 
-    vr = r->fns.vkQueuePresentKHR(r->queue, &pi);
+    surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
+
+    pass->surface      = NULL;
+    pass->cmd          = VK_NULL_HANDLE;
+    pass->bound_layout = VK_NULL_HANDLE;
+}
+
+void ne_vk_present() {
+    NERenderer* r = g_renderer_singleton;
+    NERenderSurface* surface = g_renderer_singleton->queueDeferredPresentCommand.surface;
+    const uint32_t image_index = g_renderer_singleton->queueDeferredPresentCommand.image_index;
+
+    VkSemaphore sem_render_finished = VK_NULL_HANDLE;
+    if (surface->sc.sem_render_finished && image_index < surface->sc.image_count) {
+        sem_render_finished = surface->sc.sem_render_finished[image_index];
+    }
+    if (sem_render_finished == VK_NULL_HANDLE) {
+        surface->wants_swapchain_recreate = true;
+        return;
+    }
+
+    VkPresentInfoKHR pi;
+    memset(&pi, 0, sizeof(pi));
+    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
+    pi.waitSemaphoreCount = 1;
+    pi.pWaitSemaphores = &sem_render_finished;
+    pi.swapchainCount = 1;
+    pi.pSwapchains = &surface->sc.swapchain;
+    pi.pImageIndices = &image_index;
+
+    if(!r) return;
+
+    VkResult vr = r->fns.vkQueuePresentKHR(r->queue, &pi);
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
         surface->wants_swapchain_recreate = true;
     } else if (vr != VK_SUCCESS) {
@@ -1973,11 +1954,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         surface->wants_swapchain_recreate = true;
     }
 
-    surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
-
-    pass->surface      = NULL;
-    pass->cmd          = VK_NULL_HANDLE;
-    pass->bound_layout = VK_NULL_HANDLE;
+    memset(&g_renderer_singleton->queueDeferredPresentCommand, 0, sizeof(g_renderer_singleton->queueDeferredPresentCommand));
 }
 
 /* ========================================================================
@@ -2438,148 +2415,21 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
     return (NEShaderHandle){ .id = slot_index + 1 };
 }
 
-/* ── shaderc helpers ─────────────────────────────────────────────────────── */
-
-/**
- * Load shaderc_shared.dll and resolve all required function pointers.
- * Creates the persistent compiler instance on success.
- * Returns true if shaderc is ready; false on any failure (already logs error).
- *
- * Subsequent calls are no-ops — the result of the first attempt is cached in
- * r->shaderc.load_attempted so we never hammer LoadLibraryA on every compile.
- */
-static bool ne_vk_shaderc_load(NERenderer *r) {
-    NEShaderc *sc = &r->shaderc;
-
-    if (sc->load_attempted) {
-        return sc->lib != NULL && sc->compiler != NULL;
-    }
-    sc->load_attempted = true;
-
-    sc->lib = LoadLibraryA("shaderc_shared.dll");
-    if (!sc->lib) {
-        NE_LOG_ERROR("ne_shader_create_from_source: failed to load shaderc_shared.dll. "
-                     "Ensure the Vulkan SDK is installed and shaderc_shared.dll is next to the executable.");
-        return false;
-    }
-
-#define NE_LOAD_SHADERC(field, symbol) \
-    sc->field = (ne_fn_shaderc_##field)GetProcAddress(sc->lib, #symbol); \
-    if (!sc->field) { \
-        NE_LOG_ERROR("ne_vk_shaderc_load: missing symbol '%s' in shaderc_shared.dll", #symbol); \
-        FreeLibrary(sc->lib); sc->lib = NULL; return false; \
-    }
-
-    NE_LOAD_SHADERC(compiler_initialize,                     shaderc_compiler_initialize)
-    NE_LOAD_SHADERC(compiler_release,                        shaderc_compiler_release)
-    NE_LOAD_SHADERC(compile_options_initialize,               shaderc_compile_options_initialize)
-    NE_LOAD_SHADERC(compile_options_release,                  shaderc_compile_options_release)
-    NE_LOAD_SHADERC(compile_options_set_optimization_level,   shaderc_compile_options_set_optimization_level)
-    NE_LOAD_SHADERC(compile_into_spv,                         shaderc_compile_into_spv)
-    NE_LOAD_SHADERC(result_release,                           shaderc_result_release)
-    NE_LOAD_SHADERC(result_get_compilation_status,            shaderc_result_get_compilation_status)
-    NE_LOAD_SHADERC(result_get_error_message,                 shaderc_result_get_error_message)
-    NE_LOAD_SHADERC(result_get_length,                        shaderc_result_get_length)
-    NE_LOAD_SHADERC(result_get_bytes,                         shaderc_result_get_bytes)
-
-#undef NE_LOAD_SHADERC
-
-    sc->compiler = sc->compiler_initialize();
-    if (!sc->compiler) {
-        NE_LOG_ERROR("ne_vk_shaderc_load: shaderc_compiler_initialize() returned NULL");
-        FreeLibrary(sc->lib);
-        sc->lib = NULL;
-        return false;
-    }
-
-    return true;
-}
-
-static shaderc_shader_kind ne_stage_to_shaderc_kind(NEShaderStage stage) {
-    switch (stage) {
-    case NE_SHADER_STAGE_VERTEX:   return shaderc_vertex_shader;
-    case NE_SHADER_STAGE_FRAGMENT: return shaderc_fragment_shader;
-    case NE_SHADER_STAGE_COMPUTE:  return shaderc_compute_shader;
-    default:                       return shaderc_vertex_shader;
-    }
-}
-
-static shaderc_optimization_level ne_optimization_to_shaderc(NEShaderOptimization level) {
-    switch (level) {
-    case NE_SHADER_OPTIMIZATION_NONE:        return shaderc_optimization_level_zero;
-    case NE_SHADER_OPTIMIZATION_SIZE:        return shaderc_optimization_level_size;
-    case NE_SHADER_OPTIMIZATION_PERFORMANCE: return shaderc_optimization_level_performance;
-    default:                                 return shaderc_optimization_level_zero;
-    }
-}
-
-void ne_renderer_set_shader_optimization(NERenderer *renderer, NEShaderOptimization level) {
-    if (!renderer) {
-        return;
-    }
-    renderer->shader_optimization = level;
-}
-
 NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc) {
     if (!renderer || !desc || !desc->source || !desc->entry_point) {
         return NE_SHADER_HANDLE_NULL;
     }
 
-    if (!ne_vk_shaderc_load(renderer)) {
-        return NE_SHADER_HANDLE_NULL;
-    }
+    [[maybe_unused]] const char *filename = desc->filename ? desc->filename : "<unknown>";
 
-    NEShaderc *sc = &renderer->shaderc;
-
-    shaderc_compile_options_t options = sc->compile_options_initialize();
-    if (!options) {
-        NE_LOG_ERROR("ne_shader_create_from_source: shaderc_compile_options_initialize() failed");
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    sc->compile_options_set_optimization_level(
-        options, ne_optimization_to_shaderc(renderer->shader_optimization));
-
-    const char *filename = desc->filename ? desc->filename : "<unknown>";
-    const shaderc_shader_kind kind = ne_stage_to_shaderc_kind(desc->stage);
-
-    shaderc_compilation_result_t result = sc->compile_into_spv(
-        sc->compiler,
-        desc->source, strlen(desc->source),
-        kind,
-        filename, desc->entry_point,
-        options);
-
-    sc->compile_options_release(options);
-
-    if (!result) {
-        NE_LOG_ERROR("ne_shader_create_from_source: shaderc_compile_into_spv() returned NULL (%s)",
-                     filename);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    const shaderc_compilation_status status = sc->result_get_compilation_status(result);
-    if (status != shaderc_compilation_status_success) {
-        NE_LOG_ERROR("GLSL compilation failed (%s):\n%s",
-                     filename, sc->result_get_error_message(result));
-        sc->result_release(result);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    /*
-     * Reuse ne_shader_create with the compiled SPIR-V bytes.
-     * vkCreateShaderModule copies the bytecode internally so it is safe to
-     * release the shaderc result immediately after ne_shader_create returns.
-     */
     const NEShaderDesc bytecode_desc = {
         .stage         = desc->stage,
-        .bytecode      = sc->result_get_bytes(result),
-        .bytecode_size = sc->result_get_length(result),
+        // .bytecode      = sc->result_get_bytes(result),
+        // .bytecode_size = sc->result_get_length(result),
         .entry_point   = desc->entry_point,
     };
 
     const NEShaderHandle handle = ne_shader_create(renderer, &bytecode_desc);
-    sc->result_release(result);
     return handle;
 }
 

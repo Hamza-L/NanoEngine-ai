@@ -47,13 +47,13 @@ static void on_key_down(NEWindow *window, NEKeyEvent event, void *user_data) {
 
 typedef struct Vertex {
     float position[2];
-    float color[3];
+    float color[4];
 } Vertex;
 
 static const Vertex k_triangle_vertices[] = {
-    {{ 0.0f,  0.5f}, {1.0f, 0.0f, 0.0f}},  /* top    — red   */
-    {{-0.5f, -0.5f}, {0.0f, 1.0f, 0.0f}},  /* left   — green */
-    {{ 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f}},  /* right  — blue  */
+    {{ 0.0f,  0.5f}, {1.0f, 0.0f, 0.0f, 1.0f}},  /* top    — red   */
+    {{-0.5f, -0.5f}, {0.0f, 1.0f, 0.0f, 1.0f}},  /* left   — green */
+    {{ 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f, 1.0f}},  /* right  — blue  */
 };
 
 /* ── Main ───────────────────────────────────────────────────────────────── */
@@ -80,6 +80,7 @@ int main(void) {
                                                  .width = 800,
                                                  .height = 600,
                                                  .resizable = true,
+                                                 .undecorated = true,
                                                  .show_on_create = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
@@ -106,7 +107,7 @@ int main(void) {
 
     NERenderSurface *surface = ne_renderer_create_surface(renderer,
                                                           window,
-                                                          &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.12f, 1.0f}});
+                                                          &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.01f, 0.01f, 0.015f, 0.5f}});
     if (!surface) {
         NE_LOG_ERROR("failed to create render surface");
         ne_renderer_destroy(renderer);
@@ -114,23 +115,6 @@ int main(void) {
         ne_app_destroy(app);
         return 1;
     }
-
-    /* ── Load shaders ──────────────────────────────────────────────────── */
-
-    /*
-     * Shader loading is platform-specific:
-     *
-     * macOS / Metal:
-     *   Load the single MSL source file and compile both stages at runtime.
-     *   Both vertex and fragment entry points live in the same .metal file,
-     *   so we read it once and create two handles from it.
-     *
-     * Windows / Vulkan:
-     *   Load pre-compiled SPIR-V blobs.  Each stage is a separate .spv file
-     *   produced by glslc during the build (see MakeFile_win32.mk).
-     *   NE_SPIRV_VERT_PATH / NE_SPIRV_FRAG_PATH are injected by the Makefile
-     *   so the paths stay in one place.
-     */
 
     NEShaderHandle vertex_shader   = NE_SHADER_HANDLE_NULL;
     NEShaderHandle fragment_shader = NE_SHADER_HANDLE_NULL;
@@ -160,9 +144,6 @@ int main(void) {
         return 1;
     }
 
-    /* ne_file_read always returns the raw file size, excluding the null
-     * terminator it appends internally, so bytecode_size is the exact SPIR-V
-     * byte count as required by vkCreateShaderModule. */
     vertex_shader = ne_shader_create(renderer, &(NEShaderDesc){
         .stage         = NE_SHADER_STAGE_VERTEX,
         .bytecode      = vert_spv,
@@ -240,7 +221,7 @@ int main(void) {
 
     const NEVertexAttribute vertex_attrs[] = {
         { .location = 0, .format = NE_VERTEX_FORMAT_FLOAT2, .offset = offsetof(Vertex, position) },
-        { .location = 1, .format = NE_VERTEX_FORMAT_FLOAT3, .offset = offsetof(Vertex, color) },
+        { .location = 1, .format = NE_VERTEX_FORMAT_FLOAT4, .offset = offsetof(Vertex, color) },
     };
 
     const NEVertexBufferLayout vertex_layout = {

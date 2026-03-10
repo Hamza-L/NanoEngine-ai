@@ -44,6 +44,8 @@ struct NEWindow {
 
     /* UTF-16 surrogate tracking for WM_CHAR text input. */
     uint16_t pending_high_surrogate;
+
+    void (*presentFrame)(void);
 };
 
 static wchar_t *ne_utf8_to_wide(const char *utf8) {
@@ -190,6 +192,10 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         /* Always allow closing. Actual teardown/callback happens in WM_DESTROY. */
         DestroyWindow(hwnd);
         return 0;
+
+    case WM_PAINT:
+        if(window->presentFrame) window->presentFrame();
+        return DefWindowProcW(hwnd, msg, wparam, lparam);
 
     case WM_DESTROY:
         if (window && window->open) {
@@ -517,12 +523,10 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     wchar_t *title_w = ne_utf8_to_wide(desc->title ? desc->title : "NanoEngine");
 
-    const HWND hwnd = CreateWindowExW(0, L"NanoEngineWindow", title_w ? title_w : L"NanoEngine", style, (int)desc->x, (int)desc->y,
+    const HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_COMPOSITED | WS_EX_LAYERED, L"NanoEngineWindow", title_w ? title_w : L"NanoEngine", style, (int)desc->x, (int)desc->y,
                                       win_w, win_h, NULL, NULL, app->hinstance, window);
 
-    if (title_w) {
-        free(title_w);
-    }
+    if (title_w) {free(title_w);}
 
     if (!hwnd) {
         const DWORD err = GetLastError();
@@ -722,4 +726,12 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
 
 bool ne_window_is_open(const NEWindow *window) {
     return window && window->open;
+}
+
+void ne_window_invalidate(const NEWindow *window) {
+    InvalidateRect(window->hwnd, NULL, FALSE);
+}
+
+void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void)) {
+    window->presentFrame = presentFrame;
 }

@@ -68,12 +68,12 @@ SPIRV_FRAG := $(SHADERS_DIR)/basic.frag.spv
 CFLAGS += -DNE_SPIRV_VERT_PATH="\"$(subst \,/,$(SHADERS_DIR))/basic.vert.spv\""
 CFLAGS += -DNE_SPIRV_FRAG_PATH="\"$(subst \,/,$(SHADERS_DIR))/basic.frag.spv\""
 
-$(SPIRV_VERT): shaders/spirv/basic.vert
+$(SPIRV_VERT): shaders/glsl/basic.vert
 	@echo GLSLC $<
 	@$(call mkdir_p,$(SHADERS_DIR))
 	@$(GLSLC) -fshader-stage=vert -o "$(subst /,\\,$@)" "$<"
 
-$(SPIRV_FRAG): shaders/spirv/basic.frag
+$(SPIRV_FRAG): shaders/glsl/basic.frag
 	@echo GLSLC $<
 	@$(call mkdir_p,$(SHADERS_DIR))
 	@$(GLSLC) -fshader-stage=frag -o "$(subst /,\\,$@)" "$<"
@@ -81,62 +81,35 @@ $(SPIRV_FRAG): shaders/spirv/basic.frag
 # Compiled shaders must exist before the executable is linked / run.
 EXTRA_OBJECT_DEPS += $(SPIRV_VERT) $(SPIRV_FRAG)
 
-# --- Dependencies: shaderc (runtime GLSL → SPIR-V compilation) -----------
+# --- Dependencies: glslang (runtime GLSL → SPIR-V compilation) -----------
 #
-# Headers are fetched from the shaderc GitHub repository (source-only zip,
-# no submodules — a few MB).  The DLL is NOT published as a standalone GitHub
-# release; it ships as part of the Vulkan SDK.  We copy it from there so it
-# is bundled next to the executable and can be found at runtime.
+# glslang binaries are fetched from github. A copy of those binaries exist in the vulkan SDF
+# but here we make no assumption about the existence of the SDK on the user's machine
 #
-# Requires the Vulkan SDK to be installed:
-#   https://vulkan.lunarg.com/sdk/home
-# The installer sets the VULKAN_SDK environment variable automatically.
 
-SHADERC_VERSION ?= 2024.3
-SHADERC_DIR := external/shaderc
-SHADERC_INCLUDE_DIR := $(SHADERC_DIR)/libshaderc/include
-SHADERC_HEADER_MARKER := $(SHADERC_INCLUDE_DIR)/shaderc/shaderc.h
-SHADERC_ZIP := $(BUILD_DIR)/deps/shaderc-$(SHADERC_VERSION).zip
-SHADERC_URL := https://github.com/google/shaderc/archive/refs/tags/v$(SHADERC_VERSION).zip
+GLSLANG_DIR := external/glslang
+GLSLANG_INCLUDE_DIR := $(GLSLANG_DIR)/include
+GLSLANG_HEADER_MARKER := $(GLSLANG_INCLUDE_DIR)/glslang/include/glslang_c_interface.h
+GLSLANG_ZIP := external/deps/glslang-binaries.zip
+GLSLANG_URL := https://github.com/KhronosGroup/glslang/releases/download/main-tot/glslang-master-windows-Release.zip
 
-# shaderc_shared.dll comes from the Vulkan SDK.
-# Hard-fail during make if the SDK is not installed — the engine requires it
-# for runtime shader compilation.
-ifndef VULKAN_SDK
-$(error VULKAN_SDK environment variable is not set. \
-Install the Vulkan SDK from https://vulkan.lunarg.com/sdk/home \
-to enable runtime GLSL shader compilation.)
-endif
+EXTRA_OBJECT_DEPS += $(GLSLANG_HEADER_MARKER)
+CFLAGS += -I$(GLSLANG_INCLUDE_DIR)
 
-SHADERC_DLL_SRC := $(VULKAN_SDK)/Bin/shaderc_shared.dll
-SHADERC_DLL_DST := $(BUILD_DIR)/shaderc_shared.dll
+.PHONY: deps deps-vulkan-headers deps-shaders deps-glslang
 
-EXTRA_OBJECT_DEPS += $(SHADERC_HEADER_MARKER) $(SHADERC_DLL_DST)
-CFLAGS += -I$(SHADERC_INCLUDE_DIR)
-
-.PHONY: deps deps-vulkan-headers deps-shaders deps-shaderc
-
-deps: deps-vulkan-headers deps-shaders deps-shaderc
+deps: deps-vulkan-headers deps-shaders deps-glslang
 
 deps-shaders: $(SPIRV_VERT) $(SPIRV_FRAG)
 
-deps-shaderc: $(SHADERC_HEADER_MARKER) $(SHADERC_DLL_DST)
+deps-glslang: $(GLSLANG_HEADER_MARKER)
 
-$(SHADERC_HEADER_MARKER):
-	@echo DEPS shaderc headers v$(SHADERC_VERSION)
-	@$(call mkdir_p,$(BUILD_DIR)/deps)
-	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; Invoke-WebRequest -Uri '$(SHADERC_URL)' -OutFile '$(subst /,\\,$(SHADERC_ZIP))';"
-	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; Expand-Archive -Force '$(subst /,\\,$(SHADERC_ZIP))' '$(subst /,\\,$(BUILD_DIR))\\deps';"
-	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; if (Test-Path '$(subst /,\\,$(SHADERC_DIR))') { Remove-Item -Recurse -Force '$(subst /,\\,$(SHADERC_DIR))' };"
-	@$(call mkdir_p,external)
-	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; $$src = Join-Path '$(subst /,\\,$(BUILD_DIR))\\deps' 'shaderc-$(SHADERC_VERSION)'; Move-Item -Force $$src '$(subst /,\\,$(SHADERC_DIR))';"
-
-# Copy shaderc_shared.dll from the Vulkan SDK into the build output directory.
-# The executable will find it at runtime because they share the same directory.
-$(SHADERC_DLL_DST):
-	@echo COPY shaderc_shared.dll from Vulkan SDK
-	@$(call mkdir_p,$(BUILD_DIR))
-	@copy /Y "$(subst /,\\,$(SHADERC_DLL_SRC))" "$(subst /,\\,$(SHADERC_DLL_DST))"
+$(GLSLANG_HEADER_MARKER):
+	@echo Downloading glslang lib...
+	@$(call mkdir_p,external/deps)
+	@$(call mkdir_p,$(GLSLANG_DIR))
+	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; Invoke-WebRequest -Uri '$(GLSLANG_URL)' -OutFile '$(subst /,\\,$(GLSLANG_ZIP))';"
+	@powershell -NoProfile -Command "$$ErrorActionPreference='Stop'; Expand-Archive -Force '$(subst /,\\,$(GLSLANG_ZIP))' '$(subst /,\\,$(GLSLANG_DIR))';"
 
 deps-vulkan-headers: $(VULKAN_HEADERS_MARKER)
 

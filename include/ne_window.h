@@ -472,6 +472,10 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
  */
 bool ne_window_is_open(const NEWindow *window);
 
+void ne_window_invalidate(const NEWindow *window);
+
+void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void));
+
 #ifdef __cplusplus
 }
 #endif
