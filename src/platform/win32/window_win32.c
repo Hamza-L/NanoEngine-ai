@@ -193,6 +193,47 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         DestroyWindow(hwnd);
         return 0;
 
+    case WM_NCHITTEST: {
+            // Pass to DwmDefWindowProc first if using DWM custom frames (Windows Vista+)
+            LRESULT lResult;
+            if (DwmDefWindowProc(hwnd, msg, wparam, lparam, &lResult))
+                return lResult;
+
+            // Get the screen coordinates and convert to client coordinates
+            POINT cursorPos = {GET_X_LPARAM(lparam), GET_Y_LPARAM(lparam)};
+            ScreenToClient(hwnd, &cursorPos);
+
+            // Define the fake border/sizebox thickness (e.g., 5 pixels)
+            const int BORDER_THICKNESS = 3;
+
+            // Get the window's client area dimensions
+            RECT clientRect;
+            GetClientRect(hwnd, &clientRect);
+
+            // Check if the cursor is in the resizing regions and return the correct HT* code
+            bool atLeft = cursorPos.x >= clientRect.left - BORDER_THICKNESS && cursorPos.x < clientRect.left + BORDER_THICKNESS;
+            bool atRight = cursorPos.x < clientRect.right + BORDER_THICKNESS && cursorPos.x >= clientRect.right - BORDER_THICKNESS;
+            bool atTop = cursorPos.y >= clientRect.top - BORDER_THICKNESS && cursorPos.y < clientRect.top + BORDER_THICKNESS;
+            bool atBottom = cursorPos.y < clientRect.bottom + BORDER_THICKNESS && cursorPos.y >= clientRect.bottom - BORDER_THICKNESS;
+
+            // Corner hit tests (higher priority)
+            if (atBottom && atRight) return HTBOTTOMRIGHT;
+            if (atTop && atLeft) return HTTOPLEFT;
+            if (atTop && atRight) return HTTOPRIGHT;
+            if (atBottom && atLeft) return HTBOTTOMLEFT;
+
+            // Edge hit tests
+            if (atLeft) return HTLEFT;
+            if (atRight) return HTRIGHT;
+            if (atTop) return HTTOP;
+            if (atBottom) return HTBOTTOM;
+
+            // If not in a border area, let Windows handle it, or return HTCAPTION to enable dragging the whole window
+            // If you return HTCLIENT here, mouse messages are handled in the client area
+            // You can also return HTCAPTION for custom drag regions
+            return DefWindowProc(hwnd, msg, wparam, lparam);
+        }
+
     case WM_PAINT:
         if(window->presentFrame) window->presentFrame();
         return DefWindowProcW(hwnd, msg, wparam, lparam);
@@ -221,6 +262,7 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             const int32_t h = (int32_t)HIWORD(lparam);
             window->callbacks.on_resize(window, w, h, window->user_data);
         }
+        ne_window_invalidate(window);
         return 0;
 
     case WM_MOVE:
