@@ -1,3 +1,4 @@
+#include "ne_command_recorder.h"
 #if !defined(_WIN32)
 #error "Vulkan renderer backend is currently implemented for Win32 only"
 #endif
@@ -17,6 +18,7 @@
 #include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
+#include "ne_alloc.h"
 
 #include <stdbool.h>
 #include <stdint.h>
@@ -140,7 +142,6 @@ typedef struct NEVulkanFns {
 
 enum {
     NE_VK_MAX_FRAMES_IN_FLIGHT = 2,
-    NE_VK_POOL_INITIAL_CAP = 16,
 };
 
 /* ── Buffer resource pool ───────────────────────────────────────────────── */
@@ -227,6 +228,7 @@ typedef struct NESwapchain {
 typedef struct NEQueuePresentCommand{
     NERenderSurface *surface;
     uint32_t image_index;
+    uint32_t frame_index;
 } NEQueuePresentCommand;
 
 struct NERenderer {
@@ -872,42 +874,6 @@ static uint32_t ne_vk_find_memory_type(NERenderer *r, uint32_t type_filter,
     }
 
     return UINT32_MAX;
-}
-
-/**
- * Generic pool allocation helper.
- * Works for any slot type whose first field is `bool occupied`.
- * Returns the slot index, or UINT32_MAX on failure.
- */
-static uint32_t ne_pool_alloc(void **pool_ptr, uint32_t *count_ptr, uint32_t *cap_ptr,
-                               size_t slot_size) {
-    uint8_t *pool = (uint8_t *)*pool_ptr;
-    uint32_t cap = *cap_ptr;
-
-    /* Search for free slot */
-    for (uint32_t i = 0; i < cap; i++) {
-        bool *occupied = (bool *)(pool + i * slot_size);
-        if (!*occupied) {
-            return i;
-        }
-    }
-
-    /* No free slot; grow pool */
-    uint32_t new_cap = cap == 0 ? NE_VK_POOL_INITIAL_CAP : cap * 2;
-    void *new_pool = realloc(*pool_ptr, new_cap * slot_size);
-    if (!new_pool) {
-        return UINT32_MAX;
-    }
-
-    /* Zero-initialize new slots */
-    memset((uint8_t *)new_pool + cap * slot_size, 0, (new_cap - cap) * slot_size);
-
-    uint32_t index = cap;
-    *pool_ptr = new_pool;
-    *cap_ptr = new_cap;
-    *count_ptr = *count_ptr + 1;
-
-    return index;
 }
 
 /**
@@ -1724,6 +1690,10 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
+    ne_command_record_on_current_stream( (void*)ne_renderer_begin_frame);
+    ne_command_push_param_on_current_stream(r, sizeof(r));
+    ne_command_push_param_on_current_stream(surface, sizeof(surface));
+
     // necessary to trigger a surface re-draw
     ne_window_invalidate(surface->window);
 
@@ -1866,11 +1836,10 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
-    /* ── Submit and present ──────────────────────────────────────────── */
+    /* ── Submit and deferred present ──────────────────────────────────────────── */
 
     const uint32_t image_index = surface->sc.acquired_image_index;
-
-    const uint32_t frame = surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frame_index = surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
 
@@ -1878,41 +1847,23 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     memset(&si, 0, sizeof(si));
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     si.waitSemaphoreCount = 1;
-    si.pWaitSemaphores = &surface->sc.sem_image_available[frame];
+    si.pWaitSemaphores = &surface->sc.sem_image_available[frame_index];
     si.pWaitDstStageMask = &wait_stage;
     si.commandBufferCount = 1;
-    si.pCommandBuffers = &surface->sc.cmds[frame];
-
-    VkSemaphore sem_render_finished = VK_NULL_HANDLE;
-    if (surface->sc.sem_render_finished && image_index < surface->sc.image_count) {
-        sem_render_finished = surface->sc.sem_render_finished[image_index];
-    }
-    if (sem_render_finished == VK_NULL_HANDLE) {
-        surface->wants_swapchain_recreate = true;
-        return;
-    }
-
+    si.pCommandBuffers = &surface->sc.cmds[frame_index];
     si.signalSemaphoreCount = 1;
-    si.pSignalSemaphores = &sem_render_finished;
+    si.pSignalSemaphores = &surface->sc.sem_render_finished[image_index];
 
-    vr = r->fns.vkQueueSubmit(r->queue, 1, &si, surface->sc.fences_in_flight[frame]);
+    vr = r->fns.vkQueueSubmit(r->queue, 1, &si, surface->sc.fences_in_flight[frame_index]);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit failed (vr=%d)", (int)vr);
         surface->wants_swapchain_recreate = true;
         return;
     }
 
+    r->queueDeferredPresentCommand.frame_index = frame_index;
     r->queueDeferredPresentCommand.image_index = image_index;
     r->queueDeferredPresentCommand.surface = surface;
-
-    VkPresentInfoKHR pi;
-    memset(&pi, 0, sizeof(pi));
-    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &sem_render_finished;
-    pi.swapchainCount = 1;
-    pi.pSwapchains = &surface->sc.swapchain;
-    pi.pImageIndices = &image_index;
 
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
@@ -1926,25 +1877,17 @@ void ne_vk_present() {
     NERenderSurface* surface = g_renderer_singleton->queueDeferredPresentCommand.surface;
     const uint32_t image_index = g_renderer_singleton->queueDeferredPresentCommand.image_index;
 
-    VkSemaphore sem_render_finished = VK_NULL_HANDLE;
-    if (surface->sc.sem_render_finished && image_index < surface->sc.image_count) {
-        sem_render_finished = surface->sc.sem_render_finished[image_index];
-    }
-    if (sem_render_finished == VK_NULL_HANDLE) {
-        surface->wants_swapchain_recreate = true;
-        return;
-    }
+    if(!r) return;
+    if(!surface) return;
 
     VkPresentInfoKHR pi;
     memset(&pi, 0, sizeof(pi));
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
     pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &sem_render_finished;
+    pi.pWaitSemaphores = &surface->sc.sem_render_finished[image_index];
     pi.swapchainCount = 1;
     pi.pSwapchains = &surface->sc.swapchain;
     pi.pImageIndices = &image_index;
-
-    if(!r) return;
 
     VkResult vr = r->fns.vkQueuePresentKHR(r->queue, &pi);
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {

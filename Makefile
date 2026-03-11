@@ -34,7 +34,7 @@ OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
-SRC_C := src/main.c src/ne_log.c src/ne_file.c
+SRC_C := src/main.c src/ne_log.c src/ne_file.c src/ne_alloc.c src/ne_command_recorder.c
 SRC_M :=
 
 # Test sources (only compiled when TESTING_ENABLED=1)
