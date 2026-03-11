@@ -1,4 +1,5 @@
 #include "ne_app.h"
+#include "ne_command_recorder.h"
 #include "ne_file.h"
 #include "ne_log.h"
 #include "ne_renderer.h"
@@ -251,7 +252,9 @@ int main(void) {
 
     /* ── Main loop ─────────────────────────────────────────────────────── */
 
+    NECommandStream stream = ne_command_create_command_stream();
     while (ne_window_is_open(window) && ne_app_poll_events(app)) {
+        ne_command_reset_command_stream(stream);
         NERenderPass *pass = ne_renderer_begin_frame(renderer, surface);
         if (pass) {
             ne_render_pass_set_pipeline(pass, pipeline);
