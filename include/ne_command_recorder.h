@@ -30,8 +30,10 @@ typedef struct NECommandData{
 #define CMD_REGISTER_TYPE(X) sizeof(X)
 void ne_command_register_cmd(NECommandType type, void* func, uint32_t paramCount, ...);
 
-NECommandStream ne_command_create_command_stream();
+NECommandStream ne_command_start_command_stream();
 void ne_command_reset_command_stream(NECommandStream stream);
+void ne_command_end_command_stream(NECommandStream stream);
+void ne_command_end_current_command_stream();
 
 void ne_command_record(NECommandStream recording, void* func);
 void ne_command_push_param(NECommandStream recording, void* data, size_t size);
