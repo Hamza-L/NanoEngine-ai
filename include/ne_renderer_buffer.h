@@ -14,11 +14,11 @@ typedef struct NERenderer NERenderer;
 /* Handle                                                                   */
 /* ======================================================================== */
 
-typedef struct NEBufferHandle { uint32_t id; } NEBufferHandle;
+typedef uint64_t NEBufferHandle;
 
 #define NE_BUFFER_HANDLE_NULL ((NEBufferHandle){0})
 
-static inline bool ne_buffer_handle_valid(NEBufferHandle h) { return h.id != 0; }
+static inline bool ne_buffer_handle_valid(NEBufferHandle h) { return h != 0; }
 
 /* ======================================================================== */
 /* Usage flags                                                              */

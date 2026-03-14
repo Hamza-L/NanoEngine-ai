@@ -17,16 +17,16 @@ typedef struct NERenderer NERenderer;
 /* ======================================================================== */
 
 /** Handle to a graphics (render) pipeline. */
-typedef struct NEPipelineHandle { uint32_t id; } NEPipelineHandle;
+typedef uint64_t NEPipelineHandle;
 
 /** Handle to a compute pipeline. */
-typedef struct NEComputePipelineHandle { uint32_t id; } NEComputePipelineHandle;
+typedef uint64_t NEComputePipelineHandle;
 
 #define NE_PIPELINE_HANDLE_NULL         ((NEPipelineHandle){0})
 #define NE_COMPUTE_PIPELINE_HANDLE_NULL ((NEComputePipelineHandle){0})
 
-static inline bool ne_pipeline_handle_valid(NEPipelineHandle h) { return h.id != 0; }
-static inline bool ne_compute_pipeline_handle_valid(NEComputePipelineHandle h) { return h.id != 0; }
+static inline bool ne_pipeline_handle_valid(NEPipelineHandle h) { return h != 0; }
+static inline bool ne_compute_pipeline_handle_valid(NEComputePipelineHandle h) { return h != 0; }
 
 /* ======================================================================== */
 /* Vertex layout                                                            */

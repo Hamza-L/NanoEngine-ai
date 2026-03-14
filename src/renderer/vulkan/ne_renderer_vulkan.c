@@ -2168,7 +2168,7 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
         return;
     }
 
-    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
+    uint32_t slot_index = handle - 1; /* Convert handle to index */
 
     if (slot_index >= renderer->buffer_cap || !renderer->buffers[slot_index].occupied) {
         NE_LOG_WARN("buffer_update called on invalid or destroyed buffer handle");
@@ -2237,7 +2237,7 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return;
     }
 
-    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
+    uint32_t slot_index = handle - 1; /* Convert handle to index */
 
     if (slot_index >= renderer->buffer_cap) {
         return;
@@ -2766,7 +2766,7 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
     slot->blend    = blend_attachment;
     slot->pipeline = VK_NULL_HANDLE;
 
-    return (NEPipelineHandle){ .id = slot_index + 1 };
+    return (NEPipelineHandle){ slot_index + 1 };
 }
 
 /* ── ne_pipeline_destroy ─────────────────────────────────────────────────── */
@@ -2776,10 +2776,9 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
         return;
     }
 
-    const uint32_t index = handle.id - 1;
+    const uint32_t index = handle - 1;
     if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
-        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)",
-                    handle.id);
+        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)", handle);
         return;
     }
 
@@ -2848,10 +2847,9 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
         return;
     }
 
-    const uint32_t index = pipeline.id - 1;
+    const uint32_t index = pipeline - 1;
     if (index >= r->pipeline_cap || !r->pipelines[index].occupied) {
-        NE_LOG_WARN("ne_render_pass_set_pipeline: pipeline handle (id=%u) is invalid or destroyed",
-                    pipeline.id);
+        NE_LOG_WARN("ne_render_pass_set_pipeline: pipeline handle (id=%u) is invalid or destroyed", pipeline);
         return;
     }
 
@@ -2873,7 +2871,7 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
     pass->bound_layout = slot->layout;
 }
 
-void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot,
+void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
                                       NEBufferHandle buffer) {
     if (!pass || !pass->surface || !pass->cmd) {
         return;
@@ -2884,10 +2882,9 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot,
         return;
     }
 
-    const uint32_t buf_index = buffer.id - 1;
+    const uint32_t buf_index = buffer - 1;
     if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
-        NE_LOG_WARN("ne_render_pass_set_vertex_buffer: buffer handle (id=%u) is invalid or destroyed",
-                    buffer.id);
+        NE_LOG_WARN("ne_render_pass_set_vertex_buffer: buffer handle (id=%u) is invalid or destroyed", buffer);
         return;
     }
 
@@ -2908,10 +2905,9 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
         return;
     }
 
-    const uint32_t buf_index = buffer.id - 1;
+    const uint32_t buf_index = buffer - 1;
     if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
-        NE_LOG_WARN("ne_render_pass_set_index_buffer: buffer handle (id=%u) is invalid or destroyed",
-                    buffer.id);
+        NE_LOG_WARN("ne_render_pass_set_index_buffer: buffer handle (id=%u) is invalid or destroyed", buffer);
         return;
     }
 
@@ -2922,8 +2918,7 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
     r->fns.vkCmdBindIndexBuffer(pass->cmd, vk_buffer, 0, vk_type);
 }
 
-void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
-                                     uint32_t slot, const void *data, uint32_t size) {
+void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, uint64_t slot, const void *data, size_t size) {
     if (!pass || !pass->surface || !pass->cmd || !data || size == 0) {
         return;
     }
@@ -2962,8 +2957,7 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
     r->fns.vkCmdPushConstants(pass->cmd, pass->bound_layout, stage_flags, 0, size, data);
 }
 
-void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex,
-                         uint32_t vertex_count) {
+void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t vertex_count) {
     if (!pass || !pass->surface || !pass->cmd || vertex_count == 0) {
         return;
     }
@@ -2972,8 +2966,8 @@ void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex,
     r->fns.vkCmdDraw(pass->cmd, vertex_count, 1, first_vertex, 0);
 }
 
-void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count,
-                                 uint32_t first_index, int32_t vertex_offset) {
+void ne_render_pass_draw_indexed(NERenderPass *pass, uint64_t index_count,
+                                 uint64_t first_index, int64_t vertex_offset) {
     if (!pass || !pass->surface || !pass->cmd || index_count == 0) {
         return;
     }
@@ -3002,14 +2996,14 @@ void ne_compute_pass_set_pipeline(NEComputePass *pass, NEComputePipelineHandle p
     (void)pipeline;
 }
 
-void ne_compute_pass_set_storage_buffer(NEComputePass *pass, uint32_t slot,
+void ne_compute_pass_set_storage_buffer(NEComputePass *pass, uint64_t slot,
                                         NEBufferHandle buffer) {
     (void)pass;
     (void)slot;
     (void)buffer;
 }
 
-void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint32_t slot,
+void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint64_t slot,
                                       const void *data, uint32_t size) {
     (void)pass;
     (void)slot;
@@ -3017,8 +3011,8 @@ void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint32_t slot,
     (void)size;
 }
 
-void ne_compute_pass_dispatch(NEComputePass *pass, uint32_t group_count_x,
-                              uint32_t group_count_y, uint32_t group_count_z) {
+void ne_compute_pass_dispatch(NEComputePass *pass, uint64_t group_count_x,
+                              uint64_t group_count_y, uint64_t group_count_z) {
     (void)pass;
     (void)group_count_x;
     (void)group_count_y;
