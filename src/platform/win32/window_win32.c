@@ -45,6 +45,7 @@ struct NEWindow {
     /* UTF-16 surrogate tracking for WM_CHAR text input. */
     uint16_t pending_high_surrogate;
 
+    void (*recordFrame)(void);
     void (*presentFrame)(void);
 };
 
@@ -262,7 +263,8 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             const int32_t h = (int32_t)HIWORD(lparam);
             window->callbacks.on_resize(window, w, h, window->user_data);
         }
-        ne_window_invalidate(window);
+
+        if(window->recordFrame) window->recordFrame();
         return 0;
 
     case WM_MOVE:
@@ -776,4 +778,8 @@ void ne_window_invalidate(const NEWindow *window) {
 
 void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void)) {
     window->presentFrame = presentFrame;
+}
+
+void ne_set_window_record_frame_dispatch(NEWindow *window, void(*renderFrame)(void)) {
+    window->recordFrame = renderFrame;
 }

@@ -476,6 +476,8 @@ void ne_window_invalidate(const NEWindow *window);
 
 void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void));
 
+void ne_set_window_record_frame_dispatch(NEWindow *window, void(*renderFrame)(void));
+
 #ifdef __cplusplus
 }
 #endif

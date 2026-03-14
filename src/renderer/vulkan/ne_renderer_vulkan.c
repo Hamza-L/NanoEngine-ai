@@ -319,6 +319,7 @@ struct NERenderSurface {
 
 // forwward declaration for present callback
 void ne_vk_present();
+void ne_vk_record_frame();
 
 /**
  * NERenderPass is currently backed by the surface itself.
@@ -1634,6 +1635,7 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
     r->surfaces = surface;
 
     ne_set_window_present_dispatch(window, ne_vk_present);
+    ne_set_window_record_frame_dispatch(window, ne_vk_record_frame);
 
     return surface;
 }
