@@ -296,6 +296,8 @@ struct NERenderer {
     /* Runtime GLSL → SPIR-V compilation via shaderc (loaded dynamically). */
     NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
 
+    NECommandStream stream;
+
     struct NERenderSurface *surfaces;
 };
 
@@ -1690,9 +1692,14 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
+
+    if (!g_renderer_singleton->stream.id) {
+        g_renderer_singleton->stream = ne_command_start_command_stream();
+    }
+
     ne_command_record_on_current_stream( (void*)ne_renderer_begin_frame);
     ne_command_push_param_on_current_stream(r, sizeof(r));
-    ne_command_push_param_on_current_stream(surface, sizeof(surface));
+    ne_command_push_param_on_current_stream(surface, sizeof(r));
 
     // necessary to trigger a surface re-draw
     ne_window_invalidate(surface->window);
@@ -1821,6 +1828,13 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
+
+    ne_command_record_on_current_stream( (void*)ne_renderer_end_frame);
+    ne_command_push_param_on_current_stream(r, sizeof(r));
+    ne_command_push_param_on_current_stream(pass, sizeof(pass));
+
+    ne_command_end_command_stream(g_renderer_singleton->stream);
+
     /* ── Close the render pass and command buffer ────────────────────── */
 
     VkCommandBuffer cmd = pass->cmd;
@@ -1898,6 +1912,10 @@ void ne_vk_present() {
     }
 
     memset(&g_renderer_singleton->queueDeferredPresentCommand, 0, sizeof(g_renderer_singleton->queueDeferredPresentCommand));
+}
+
+void ne_vk_record_frame() {
+    ne_command_stream_replay(g_renderer_singleton->stream);
 }
 
 /* ========================================================================
@@ -2841,6 +2859,11 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
         return;
     }
 
+
+    ne_command_record_on_current_stream( (void*)ne_render_pass_set_pipeline);
+    ne_command_push_param_on_current_stream(pass, sizeof(pass));
+    ne_command_push_param_on_current_stream((void*)pipeline, sizeof(pipeline));
+
     NERenderer *r = pass->surface->renderer;
     if (!r || !ne_pipeline_handle_valid(pipeline)) {
         NE_LOG_WARN("ne_render_pass_set_pipeline: invalid pass or pipeline handle");
@@ -2876,6 +2899,12 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
     if (!pass || !pass->surface || !pass->cmd) {
         return;
     }
+
+
+    ne_command_record_on_current_stream( (void*)ne_render_pass_set_vertex_buffer);
+    ne_command_push_param_on_current_stream(pass, sizeof(pass));
+    ne_command_push_param_on_current_stream((void*)slot, sizeof(slot));
+    ne_command_push_param_on_current_stream((void*)buffer, sizeof(buffer));
 
     NERenderer *r = pass->surface->renderer;
     if (!r || !ne_buffer_handle_valid(buffer)) {
@@ -2961,6 +2990,11 @@ void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t ver
     if (!pass || !pass->surface || !pass->cmd || vertex_count == 0) {
         return;
     }
+
+    ne_command_record_on_current_stream( (void*)ne_render_pass_draw);
+    ne_command_push_param_on_current_stream(pass, sizeof(pass));
+    ne_command_push_param_on_current_stream((void *)first_vertex, sizeof(first_vertex));
+    ne_command_push_param_on_current_stream((void *)vertex_count, sizeof(vertex_count));
 
     NERenderer *r = pass->surface->renderer;
     r->fns.vkCmdDraw(pass->cmd, vertex_count, 1, first_vertex, 0);

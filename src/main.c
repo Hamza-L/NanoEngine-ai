@@ -34,7 +34,9 @@ static void on_close(NEWindow *window, void *user_data) {
 static void on_resize(NEWindow *window, int32_t width, int32_t height, void *user_data) {
     (void)window;
     (void)user_data;
-    NE_LOG_INFO("resize: %d x %d", width, height);
+    (void)width;
+    (void)height;
+    // NE_LOG_INFO("resize: %d x %d", width, height);
 }
 
 static void on_key_down(NEWindow *window, NEKeyEvent event, void *user_data) {
@@ -252,18 +254,12 @@ int main(void) {
 
     /* ── Main loop ─────────────────────────────────────────────────────── */
 
-    NECommandStream stream = ne_command_create_command_stream();
     while (ne_window_is_open(window) && ne_app_poll_events(app)) {
-        ne_command_reset_command_stream(stream);
         NERenderPass *pass = ne_renderer_begin_frame(renderer, surface);
-        if (pass) {
-            ne_render_pass_set_pipeline(pass, pipeline);
-            ne_render_pass_set_vertex_buffer(pass, 0, vbo);
-            ne_render_pass_draw(pass, 0, 3);
-            ne_renderer_end_frame(renderer, pass);
-        } else {
-            NE_PLATFORM_YIELD_MS_1();
-        }
+        ne_render_pass_set_pipeline(pass, pipeline);
+        ne_render_pass_set_vertex_buffer(pass, 0, vbo);
+        ne_render_pass_draw(pass, 0, 3);
+        ne_renderer_end_frame(renderer, pass);
     }
 
     /* ── Cleanup ───────────────────────────────────────────────────────── */
