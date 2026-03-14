@@ -56,7 +56,7 @@ static bool test_buffer_create_destroy(NERenderer *renderer) {
         NE_LOG_ERROR("failed to create buffer");
         return false;
     }
-    NE_LOG_INFO("✓ buffer created (handle id=%u, size=256 bytes)", buf.id);
+    NE_LOG_INFO("✓ buffer created (handle id=%u, size=256 bytes)", buf);
 
     /* Destroy the buffer */
     ne_buffer_destroy(renderer, buf);
@@ -87,7 +87,7 @@ static bool test_buffer_initial_data(NERenderer *renderer) {
         return false;
     }
     NE_LOG_INFO("✓ vertex buffer created with initial data (handle id=%u, size=%zu bytes)",
-                vbo.id, sizeof(k_test_vertices));
+                vbo, sizeof(k_test_vertices));
 
     /* Create index buffer with initial data */
     NEBufferHandle ibo = ne_buffer_create(renderer, &(NEBufferDesc){
@@ -102,7 +102,7 @@ static bool test_buffer_initial_data(NERenderer *renderer) {
         return false;
     }
     NE_LOG_INFO("✓ index buffer created with initial data (handle id=%u, size=%zu bytes)",
-                ibo.id, sizeof(k_test_indices));
+                ibo, sizeof(k_test_indices));
 
     /* Cleanup */
     ne_buffer_destroy(renderer, vbo);
@@ -129,7 +129,7 @@ static bool test_buffer_update(NERenderer *renderer) {
         NE_LOG_ERROR("failed to create buffer");
         return false;
     }
-    NE_LOG_INFO("✓ buffer created (handle id=%u)", buf.id);
+    NE_LOG_INFO("✓ buffer created (handle id=%u)", buf);
 
     /* Update buffer data */
     Vertex updated_vertices[] = {
