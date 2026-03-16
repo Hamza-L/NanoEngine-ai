@@ -1,4 +1,5 @@
 CC := clang
+LD := clang-cl
 OBJC := clang
 
 # Public target name (what users type): no extension, consistent across platforms.
@@ -29,9 +30,9 @@ TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 # default goal stays consistent.
 .DEFAULT_GOAL := all
 
-CFLAGS := -std=c2x -g -DDEBUG -fdeclspec -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
+CFLAGS := -std=c23 -g -DDEBUG -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
 OBJCFLAGS := -fobjc-arc
-LDFLAGS :=
+LDFLAGS := /Z7 /MDd
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
 SRC_C := src/main.c src/ne_log.c src/ne_file.c src/ne_alloc.c src/ne_command_recorder.c
@@ -89,7 +90,7 @@ $(APP_NAME): $(OUTPUT)
 # Real file target used for correct incremental linking.
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
-	@$(CC) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
+	@$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
 
 $(BUILD_DIR):
 	@$(call mkdir_p,$(BUILD_DIR))

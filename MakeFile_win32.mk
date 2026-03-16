@@ -29,10 +29,10 @@ SHADERS_DIR := $(BUILD_DIR)/shaders
 # Keep MSVC-style .lib names. Use -Xlinker so clang doesn't require the .lib
 # to be present in the current working directory; the linker will resolve it
 # via its library search paths.
-LDFLAGS += -Xlinker user32.lib
-LDFLAGS += -Xlinker gdi32.lib
-LDFLAGS += -Xlinker dwmapi.lib
-LDFLAGS += -g
+LDFLAGS += /link
+LDFLAGS += user32.lib
+LDFLAGS += gdi32.lib
+LDFLAGS += dwmapi.lib
 
 LDASANFLAGS := clang_rt.asan-x86_64.lib
 
@@ -88,13 +88,17 @@ EXTRA_OBJECT_DEPS += $(SPIRV_VERT) $(SPIRV_FRAG)
 #
 
 GLSLANG_DIR := external/glslang
-GLSLANG_INCLUDE_DIR := $(GLSLANG_DIR)/include
-GLSLANG_HEADER_MARKER := $(GLSLANG_INCLUDE_DIR)/glslang/include/glslang_c_interface.h
+GLSLANG_INCLUDE_DIR := $(GLSLANG_DIR)/include/glslang/Include
+GLSLANG_HEADER_MARKER := $(GLSLANG_INCLUDE_DIR)/glslang_c_interface.h
 GLSLANG_ZIP := external/deps/glslang-binaries.zip
 GLSLANG_URL := https://github.com/KhronosGroup/glslang/releases/download/main-tot/glslang-master-windows-Release.zip
 
 EXTRA_OBJECT_DEPS += $(GLSLANG_HEADER_MARKER)
 CFLAGS += -I$(GLSLANG_INCLUDE_DIR)
+LDFLAGS += $(GLSLANG_DIR)/lib/glslang.lib
+LDFLAGS += $(GLSLANG_DIR)/lib/glslang-default-resource-limits.lib
+LDFLAGS += $(GLSLANG_DIR)/lib/SPIRV-Tools-opt.lib
+LDFLAGS += $(GLSLANG_DIR)/lib/SPIRV-Tools.lib
 
 .PHONY: deps deps-vulkan-headers deps-shaders deps-glslang
 
