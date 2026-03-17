@@ -1699,6 +1699,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
+    ne_window_show(surface->window);
 
     if (!g_renderer_singleton->stream.id) {
         g_renderer_singleton->stream = ne_command_start_command_stream();

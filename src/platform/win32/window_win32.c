@@ -9,6 +9,9 @@
 
 #include <stdlib.h>
 #include <string.h>
+#include <math.h>
+
+#define CUSTOM_TITLEBAR_HEIGHT 28
 
 struct NEApp {
     HINSTANCE hinstance;
@@ -25,11 +28,17 @@ static struct {
     uint32_t refcount;
 } g_app_state = {0};
 
+typedef struct NETitleBar{
+    const char* title;
+    float height;
+} NETitleBar;
+
 struct NEWindow {
     NEApp *app;
     HWND hwnd;
 
     NEWindowCallbacks callbacks;
+    NETitleBar titlebar;
     void *user_data;
 
     bool open;
@@ -212,22 +221,40 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             GetClientRect(hwnd, &clientRect);
 
             // Check if the cursor is in the resizing regions and return the correct HT* code
+            float botright[2] = {cursorPos.x - clientRect.right, cursorPos.y - clientRect.bottom};
+            if ((sqrtf(botright[0] * botright[0] + botright[1] * botright[1]) - BORDER_THICKNESS*4) < 0) {
+                return HTBOTTOMRIGHT;
+            }
+
+            float topright[2] = {cursorPos.x - clientRect.right, cursorPos.y - clientRect.top};
+            if ((sqrtf(topright[0] * topright[0] + topright[1] * topright[1]) - BORDER_THICKNESS*4) < 0) {
+                return HTTOPRIGHT;
+            }
+
+            float botleft[2] = {cursorPos.x - clientRect.left, cursorPos.y - clientRect.bottom};
+            if ((sqrtf(botleft[0] * botleft[0] + botleft[1] * botleft[1]) - BORDER_THICKNESS*4) < 0) {
+                return HTBOTTOMLEFT;
+            }
+
+            float topleft[2] = {cursorPos.x - clientRect.left, cursorPos.y - clientRect.top};
+            if ((sqrtf(topleft[0] * topleft[0] + topleft[1] * topleft[1]) - BORDER_THICKNESS*4) < 0) {
+                return HTTOPLEFT;
+            }
+
             bool atLeft = cursorPos.x >= clientRect.left - BORDER_THICKNESS && cursorPos.x < clientRect.left + BORDER_THICKNESS;
             bool atRight = cursorPos.x < clientRect.right + BORDER_THICKNESS && cursorPos.x >= clientRect.right - BORDER_THICKNESS;
             bool atTop = cursorPos.y >= clientRect.top - BORDER_THICKNESS && cursorPos.y < clientRect.top + BORDER_THICKNESS;
             bool atBottom = cursorPos.y < clientRect.bottom + BORDER_THICKNESS && cursorPos.y >= clientRect.bottom - BORDER_THICKNESS;
-
-            // Corner hit tests (higher priority)
-            if (atBottom && atRight) return HTBOTTOMRIGHT;
-            if (atTop && atLeft) return HTTOPLEFT;
-            if (atTop && atRight) return HTTOPRIGHT;
-            if (atBottom && atLeft) return HTBOTTOMLEFT;
 
             // Edge hit tests
             if (atLeft) return HTLEFT;
             if (atRight) return HTRIGHT;
             if (atTop) return HTTOP;
             if (atBottom) return HTBOTTOM;
+
+            if (cursorPos.y <= window->titlebar.height && cursorPos.y > 0) {
+                return HTCAPTION;
+            }
 
             // If not in a border area, let Windows handle it, or return HTCAPTION to enable dragging the whole window
             // If you return HTCLIENT here, mouse messages are handled in the client area
@@ -557,6 +584,9 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
         if (desc->resizable) {
             style |= WS_THICKFRAME;
         }
+    } else {
+        window->titlebar.height = CUSTOM_TITLEBAR_HEIGHT;
+        window->titlebar.title = desc->title;
     }
 
     // adjusts the size of the window by adding the size of decorators and border so the client area is the actual area given
@@ -577,6 +607,10 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
         NE_LOG_ERROR("CreateWindowExW failed (err=%lu)", (unsigned long)err);
         free(window);
         return NULL;
+    } else {
+        BOOL USE_DARK_MODE = true;
+        DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
+                              &USE_DARK_MODE, sizeof(USE_DARK_MODE));
     }
 
     if(desc->undecorated){
@@ -615,7 +649,7 @@ void ne_window_destroy(NEWindow *window) {
 }
 
 void ne_window_show(NEWindow *window) {
-    if (!window || !window->hwnd) {
+    if (!window || !window->hwnd || window->shown) {
         return;
     }
     ShowWindow(window->hwnd, SW_SHOW);

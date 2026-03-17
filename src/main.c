@@ -82,8 +82,8 @@ int main(void) {
                                                  .width = 800,
                                                  .height = 600,
                                                  .resizable = true,
-                                                 // .undecorated = true,
-                                                 .show_on_create = true});
+                                                 .undecorated = true,
+                                                 .show_on_create = false});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);
@@ -123,42 +123,17 @@ int main(void) {
 
 #if defined(_WIN32)
 
-    // size_t vert_spv_size = 0;
-    // void *vert_spv = ne_file_read(NE_SPIRV_VERT_PATH, &vert_spv_size);
-    // if (!vert_spv) {
-    //     NE_LOG_ERROR("failed to load vertex SPIR-V: " NE_SPIRV_VERT_PATH);
-    //     ne_renderer_destroy_surface(renderer, surface);
-    //     ne_renderer_destroy(renderer);
-    //     ne_window_destroy(window);
-    //     ne_app_destroy(app);
-    //     return 1;
-    // }
-
-    size_t frag_spv_size = 0;
-    void *frag_spv = ne_file_read(NE_SPIRV_FRAG_PATH, &frag_spv_size);
-    if (!frag_spv) {
-        NE_LOG_ERROR("failed to load fragment SPIR-V: " NE_SPIRV_FRAG_PATH);
-        ne_renderer_destroy_surface(renderer, surface);
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
-
     vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
         .stage         = NE_SHADER_STAGE_VERTEX,
-        .filename = "shaders/glsl/basic.vert",
+        .filename      = "shaders/glsl/basic.vert",
         .entry_point   = "main",
     });
 
-    fragment_shader = ne_shader_create(renderer, &(NEShaderDesc){
+    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
         .stage         = NE_SHADER_STAGE_FRAGMENT,
-        .bytecode      = frag_spv,
-        .bytecode_size = frag_spv_size,
+        .filename      = "shaders/glsl/basic.frag",
         .entry_point   = "main",
     });
-
-    ne_file_free(frag_spv);
 
 #else /* macOS / Metal */
 
