@@ -201,8 +201,10 @@ typedef struct NEVulkanPipelineSlot {
     /* Captured state for deferred vkCreateGraphicsPipelines. */
     VkShaderModule vert_module;
     VkShaderModule frag_module;
+    VkShaderModule compute_module;
     char *vert_entry;           /* strdup'd entry point name */
     char *frag_entry;           /* strdup'd entry point name */
+    char *compute_entry;        /* strdup'd entry point name */
 
     VkVertexInputBindingDescription *bindings;
     uint32_t binding_count;
@@ -1382,13 +1384,6 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     surface->wants_swapchain_recreate = false;
     return true;
 }
-
-/*
- * ne_vk_transition_image() was removed — render pass automatic layout
- * transitions replaced the manual clear-based path.  The PFN for
- * vkCmdPipelineBarrier is still loaded for future use (e.g. compute
- * dispatch barriers, off-screen render target transitions).
- */
 
 NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     (void)app;
@@ -3344,10 +3339,86 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
 
 NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
                                                    const NEComputePipelineDesc *desc) {
-    (void)renderer;
-    (void)desc;
-    NE_LOG_WARN("ne_compute_pipeline_create: compute pipelines not yet implemented on Vulkan");
-    return NE_COMPUTE_PIPELINE_HANDLE_NULL;
+    if (!renderer || !desc) {
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Validate inputs ─────────────────────────────────────────────── */
+
+    if (!ne_shader_handle_valid(desc->compute_shader)) {
+        NE_LOG_ERROR("ne_compute_pipeline_create: compute_shader handle is null");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Resolve shader handles ──────────────────────────────────────── */
+
+    const uint32_t cs_index = desc->compute_shader.id - 1;
+
+    if (cs_index >= renderer->shader_cap || !renderer->shaders[cs_index].occupied) {
+        NE_LOG_ERROR("ne_compute_pipeline_create: compute_shader handle (id=%u) is invalid or destroyed",
+                     desc->compute_shader.id);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    NEVulkanShaderSlot *cs_slot = &renderer->shaders[cs_index];
+
+    /* ── Create pipeline layout ──────────────────────────────────────── */
+
+    VkPushConstantRange push_range;
+    memset(&push_range, 0, sizeof(push_range));
+    push_range.stageFlags = VK_SHADER_STAGE_COMPUTE_BIT;
+    push_range.offset     = 0;
+    push_range.size       = 128; /* Guaranteed minimum by Vulkan spec. */
+
+    VkPipelineLayoutCreateInfo plci;
+    memset(&plci, 0, sizeof(plci));
+    plci.sType                  = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+    plci.pushConstantRangeCount = 1;
+    plci.pPushConstantRanges    = &push_range;
+
+    VkPipelineLayout layout = VK_NULL_HANDLE;
+    VkResult vr = renderer->fns.vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
+    if (vr != VK_SUCCESS || layout == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreatePipelineLayout failed (vr=%d)", (int)vr);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Allocate pool slot ──────────────────────────────────────────── */
+    const uint32_t slot_index = ne_pool_alloc(
+        (void **)&renderer->pipelines,
+        &renderer->pipeline_count,
+        &renderer->pipeline_cap,
+        sizeof(NEVulkanPipelineSlot)
+    );
+
+    if (slot_index == UINT32_MAX) {
+        NE_LOG_ERROR("ne_compute_pipeline_create: pipeline pool allocation failed");
+        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    NEVulkanPipelineSlot *slot = &renderer->pipelines[slot_index];
+
+    slot->occupied           = true;
+    slot->needs_compile      = true;
+    slot->compilation_failed = false;
+
+    slot->layout       = layout;
+    slot->compute_module  = cs_slot->module;
+    slot->compute_entry   = _strdup(cs_slot->entry_point);
+
+    if (!slot->compute_entry){
+        NE_LOG_ERROR("ne_compute_pipeline_create: out of memory copying entry point names");
+        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        free(slot->compute_entry);
+        slot->occupied = false;
+        slot->layout = VK_NULL_HANDLE;
+        slot->compute_entry = NULL;
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+    slot->pipeline = VK_NULL_HANDLE;
+
+    return (NEPipelineHandle){ slot_index + 1 };
 }
 
 void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle handle) {
