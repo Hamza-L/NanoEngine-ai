@@ -15,6 +15,7 @@
 #include "ne_file.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
+#include "ne_renderer_image.h"
 #include "ne_renderer_pass.h"
 #include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
@@ -101,14 +102,20 @@ typedef struct NEVulkanFns {
     PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
     PFN_vkCreateBuffer vkCreateBuffer;
     PFN_vkDestroyBuffer vkDestroyBuffer;
+    PFN_vkCreateImage vkCreateImage;
+    PFN_vkDestroyImage vkDestroyImage;
     PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
+    PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
     PFN_vkAllocateMemory vkAllocateMemory;
     PFN_vkFreeMemory vkFreeMemory;
     PFN_vkBindBufferMemory vkBindBufferMemory;
+    PFN_vkBindImageMemory vkBindImageMemory;
     PFN_vkMapMemory vkMapMemory;
     PFN_vkUnmapMemory vkUnmapMemory;
     PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
     PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
+    PFN_vkCmdCopyImage vkCmdCopyImage;
+    PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
 
     /* Shader management */
     PFN_vkCreateShaderModule vkCreateShaderModule;
@@ -154,8 +161,21 @@ enum {
 typedef struct NEVulkanBufferSlot {
     bool occupied;
     uint32_t usage;
-    uint32_t size;
-    VkBuffer buffer;
+    union {
+        uint32_t size;
+        struct {
+            uint32_t width;
+            uint32_t height;
+            NEImageFormat format;
+        };
+    };
+    union {
+        VkBuffer buffer;
+        struct {
+            VkImage image;
+            VkImageView imageView;
+        };
+    };
     VkDeviceMemory memory;
 } NEVulkanBufferSlot;
 
@@ -607,14 +627,20 @@ static bool ne_vk_load_device_fns(NERenderer *r) {
     /* Buffer management functions */
     f->vkCreateBuffer = (PFN_vkCreateBuffer)ne_vk_get_device(f, r->device, "vkCreateBuffer");
     f->vkDestroyBuffer = (PFN_vkDestroyBuffer)ne_vk_get_device(f, r->device, "vkDestroyBuffer");
+    f->vkCreateImage = (PFN_vkCreateImage)ne_vk_get_device(f, r->device, "vkCreateImage");
+    f->vkDestroyImage = (PFN_vkDestroyImage)ne_vk_get_device(f, r->device, "vkDestroyImage");
     f->vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)ne_vk_get_device(f, r->device, "vkGetBufferMemoryRequirements");
+    f->vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)ne_vk_get_device(f, r->device, "vkGetImageMemoryRequirements");
     f->vkAllocateMemory = (PFN_vkAllocateMemory)ne_vk_get_device(f, r->device, "vkAllocateMemory");
     f->vkFreeMemory = (PFN_vkFreeMemory)ne_vk_get_device(f, r->device, "vkFreeMemory");
     f->vkBindBufferMemory = (PFN_vkBindBufferMemory)ne_vk_get_device(f, r->device, "vkBindBufferMemory");
+    f->vkBindImageMemory = (PFN_vkBindImageMemory)ne_vk_get_device(f, r->device, "vkBindImageMemory");
     f->vkMapMemory = (PFN_vkMapMemory)ne_vk_get_device(f, r->device, "vkMapMemory");
     f->vkUnmapMemory = (PFN_vkUnmapMemory)ne_vk_get_device(f, r->device, "vkUnmapMemory");
     f->vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)ne_vk_get_device(f, r->device, "vkFlushMappedMemoryRanges");
     f->vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)ne_vk_get_device(f, r->device, "vkCmdCopyBuffer");
+    f->vkCmdCopyImage = (PFN_vkCmdCopyImage)ne_vk_get_device(f, r->device, "vkCmdCopyImage");
+    f->vkCmdCopyBufferToImage = (PFN_vkCmdCopyBufferToImage)ne_vk_get_device(f, r->device, "vkCmdCopyBufferToImage");
 
     /* Shader management functions */
     f->vkCreateShaderModule = (PFN_vkCreateShaderModule)ne_vk_get_device(f, r->device, "vkCreateShaderModule");
@@ -2793,9 +2819,9 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     const char *ptr = filename;
     while(*ptr) {ptr++;};
     while(*ptr != '.') {ptr--;};
-    if(!strcmp(ptr, ".vert")) stage = GLSLANG_STAGE_VERTEX;
-    else if(!strcmp(ptr, ".frag")) stage = GLSLANG_STAGE_FRAGMENT;
-    else if(!strcmp(ptr, ".comp")) stage = GLSLANG_STAGE_COMPUTE;
+    if(desc->stage == NE_SHADER_STAGE_VERTEX) stage = GLSLANG_STAGE_VERTEX;
+    else if(desc->stage == NE_SHADER_STAGE_FRAGMENT) stage = GLSLANG_STAGE_FRAGMENT;
+    else if(desc->stage == NE_SHADER_STAGE_COMPUTE) stage = GLSLANG_STAGE_COMPUTE;
     else { return NE_SHADER_HANDLE_NULL;}
 
     size_t size = 0;
