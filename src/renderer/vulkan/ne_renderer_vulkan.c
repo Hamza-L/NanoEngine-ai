@@ -2188,6 +2188,360 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     return handle;
 }
 
+static void ne_cmd_transition_image_layout(const NERenderer *renderer, const VkCommandBuffer cmd, const NEImageHandle handle, const VkImageLayout oldLayout, const VkImageLayout newLayout) {
+    if (!ne_image_handle_valid(handle)) {
+        NE_LOG_ERROR("ne_cmd_transition_image_layout: INVALID IMAGE HANDLE/n");
+        return;
+    }
+
+    uint32_t slot_index = handle - 1; /* Convert handle to index */
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    VkImageMemoryBarrier barrier;
+    memset(&barrier, 0, sizeof(barrier));
+    barrier.sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+    barrier.oldLayout = oldLayout;
+    barrier.newLayout = newLayout;
+    barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+    barrier.image = slot->image;
+    barrier.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    barrier.subresourceRange.baseMipLevel = 0;
+    barrier.subresourceRange.levelCount = 1;
+    barrier.subresourceRange.baseArrayLayer = 0;
+    barrier.subresourceRange.layerCount = 1;
+
+    VkPipelineStageFlags sourceStage = 0;
+    VkPipelineStageFlags destinationStage = 0;
+
+    if (oldLayout == VK_IMAGE_LAYOUT_UNDEFINED && newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = 0;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+
+        sourceStage = VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+    } else {
+        NE_LOG_ERROR("UNSUPPORTED LAYOUT TRANSITION\n");
+        return;
+    }
+
+    renderer->fns.vkCmdPipelineBarrier(
+        cmd,
+        sourceStage, destinationStage,
+        0,
+        0, nullptr,
+        0, nullptr,
+        1, &barrier
+    );
+}
+
+static void ne_cmd_copy_buffer_to_image(const NERenderer *renderer, const VkCommandBuffer cmd, const VkBuffer buffer, const NEImageHandle handle) {
+    if (!ne_image_handle_valid(handle)) {
+        NE_LOG_ERROR("ne_cmd_copy_buffer_to_image: INVALID IMAGE HANDLE/n");
+        return;
+    }
+
+    uint32_t slot_index = handle - 1; /* Convert handle to index */
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    // copy the staging buffer to the GPU image buffer
+    VkBufferImageCopy copy_region;
+    memset(&copy_region, 0, sizeof(copy_region));
+    copy_region.bufferOffset = 0;
+    copy_region.bufferRowLength = 0;
+    copy_region.bufferImageHeight = 0;
+    copy_region.imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+    copy_region.imageSubresource.mipLevel = 0;
+    copy_region.imageSubresource.baseArrayLayer = 0;
+    copy_region.imageSubresource.layerCount = 1;
+    copy_region.imageOffset = (VkOffset3D){0, 0, 0};
+    copy_region.imageExtent = (VkExtent3D){slot->width, slot->height, 1};
+
+    renderer->fns.vkCmdCopyBufferToImage(cmd, buffer, slot->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+}
+
+NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
+    if (!renderer || !desc || desc->width == 0 || desc->height == 0) {
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    if (!desc->usage) {
+        NE_LOG_ERROR("buffer creation requires at least one usage flag");
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Allocate a slot from the buffer pool */
+    uint32_t slot_index = ne_pool_alloc(
+        (void **)&renderer->buffers,
+        &renderer->buffer_count,
+        &renderer->buffer_cap,
+        sizeof(NEVulkanBufferSlot)
+    );
+
+    if (slot_index == UINT32_MAX) {
+        NE_LOG_ERROR("failed to allocate buffer slot from pool");
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    NEBufferHandle handle = {slot_index + 1};
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    /* Convert NEBufferUsage flags to VkBufferUsageFlags */
+    VkBufferUsageFlags vk_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT; /* All buffers can receive transfers */
+    if (desc->usage & NE_BUFFER_USAGE_IMAGE_STORAGE) {
+        vk_usage |= VK_IMAGE_USAGE_STORAGE_BIT;
+    }
+    if (desc->usage & NE_BUFFER_USAGE_IMAGE_SAMPLED) {
+        vk_usage |= VK_IMAGE_USAGE_SAMPLED_BIT;
+    }
+
+    VkFormat vk_format = VK_FORMAT_R8G8B8A8_SRGB; // default
+    if (desc->format == NE_IMAGE_FORMAT_GRAY) {
+        vk_format = VK_FORMAT_R8_SRGB;
+    } else if (desc->format == NE_IMAGE_FORMAT_RGB) {
+        vk_format = VK_FORMAT_R8G8B8_SRGB;
+    } else if (desc->format == NE_IMAGE_FORMAT_RGBA) {
+        vk_format = VK_FORMAT_R8G8B8A8_SRGB;
+    }
+
+    const uint32_t size = desc->width * desc->height * desc->format;
+
+    /* Create the GPU buffer */
+    VkImageCreateInfo img_info;
+    memset(&img_info, 0, sizeof(img_info));
+    img_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+    img_info.imageType = VK_IMAGE_TYPE_2D;
+    img_info.extent.width = desc->width;
+    img_info.extent.height = desc->height;
+    img_info.extent.depth = 1;
+    img_info.mipLevels = 1;
+    img_info.arrayLayers = 1;
+    img_info.format = vk_format;
+    img_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+    img_info.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+    img_info.usage = vk_usage;
+    img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+    img_info.samples = VK_SAMPLE_COUNT_1_BIT;
+
+    VkResult vr = renderer->fns.vkCreateImage(renderer->device, &img_info, NULL, &slot->image);
+    if (vr != VK_SUCCESS || slot->image == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateImage failed (vr=%d, size=%u)", (int)vr, size);
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Get memory requirements for the buffer */
+    VkMemoryRequirements mem_req;
+    renderer->fns.vkGetImageMemoryRequirements(renderer->device, slot->image, &mem_req);
+
+    /* Find device-local memory for the GPU buffer */
+    uint32_t mem_type = ne_vk_find_memory_type(
+        renderer,
+        mem_req.memoryTypeBits,
+        VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT
+    );
+
+    if (mem_type == UINT32_MAX) {
+        NE_LOG_ERROR("failed to find device-local memory type for buffer");
+        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        slot->image = VK_NULL_HANDLE;
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Allocate memory for the buffer */
+    VkMemoryAllocateInfo alloc_info;
+    memset(&alloc_info, 0, sizeof(alloc_info));
+    alloc_info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+    alloc_info.allocationSize = mem_req.size;
+    alloc_info.memoryTypeIndex = mem_type;
+
+    vr = renderer->fns.vkAllocateMemory(renderer->device, &alloc_info, NULL, &slot->memory);
+    if (vr != VK_SUCCESS || slot->memory == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkAllocateMemory failed (vr=%d)", (int)vr);
+        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        slot->image = VK_NULL_HANDLE;
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* Bind memory to buffer */
+    vr = renderer->fns.vkBindImageMemory(renderer->device, slot->image, slot->memory, 0);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkBindBufferMemory failed (vr=%d)", (int)vr);
+        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+        slot->memory = VK_NULL_HANDLE;
+        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        slot->image = VK_NULL_HANDLE;
+        slot->occupied = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
+    /* If initial data is provided, stage it to the buffer */
+    if (desc->initial_data) {
+        if (!ne_vk_ensure_staging_buffer(renderer, size)) {
+            NE_LOG_ERROR("failed to ensure staging buffer for initial data");
+            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+            slot->image = VK_NULL_HANDLE;
+            slot->occupied = false;
+            return NE_BUFFER_HANDLE_NULL;
+        }
+
+        /* Copy initial data into the staging buffer */
+        memcpy(renderer->staging_mapped, desc->initial_data, size);
+
+        /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
+        VkMappedMemoryRange flush_range;
+        memset(&flush_range, 0, sizeof(flush_range));
+        flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+        flush_range.memory = renderer->staging_memory;
+        flush_range.offset = 0;
+        flush_range.size = VK_WHOLE_SIZE;
+
+        vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
+        }
+
+        /* Record and submit transfer command */
+        VkCommandBufferBeginInfo begin_info;
+        memset(&begin_info, 0, sizeof(begin_info));
+        begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+        begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+        vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
+            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+            slot->image= VK_NULL_HANDLE;
+            slot->occupied = false;
+            return NE_BUFFER_HANDLE_NULL;
+        }
+
+        ne_cmd_transition_image_layout(renderer, renderer->transfer_cmd, handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+        ne_cmd_copy_buffer_to_image(renderer, renderer->transfer_cmd, renderer->staging_buffer, handle);
+
+        /* Submit and wait for completion */
+        if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
+            NE_LOG_ERROR("failed to submit transfer command for initial data");
+            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            slot->buffer = VK_NULL_HANDLE;
+            slot->occupied = false;
+            return NE_BUFFER_HANDLE_NULL;
+        }
+
+        /* Reset the command buffer for reuse */
+        vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
+        }
+    }
+
+    // create image view
+    {
+        VkImageViewCreateInfo viewInfo;
+        memset(&viewInfo, 0, sizeof(viewInfo));
+        viewInfo.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+        viewInfo.image = slot->image;
+        viewInfo.viewType = VK_IMAGE_VIEW_TYPE_2D;
+        viewInfo.format = vk_format;
+        viewInfo.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+        viewInfo.subresourceRange.baseMipLevel = 0;
+        viewInfo.subresourceRange.levelCount = 1;
+        viewInfo.subresourceRange.baseArrayLayer = 0;
+        viewInfo.subresourceRange.layerCount = 1;
+
+        vr = renderer->fns.vkCreateImageView(renderer->device, &viewInfo, nullptr, &slot->imageView);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_WARN("vkCreateImageView failed (vr=%d), continuing anyway", (int)vr);
+        }
+    }
+
+    /* Mark the slot as occupied and store metadata */
+    slot->occupied = true;
+    slot->usage = desc->usage;
+    slot->width = desc->width;
+    slot->height = desc->height;
+    slot->format = desc->format;
+
+    /* Return handle (1-based ID for null safety) */
+    return handle;
+}
+
+void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *data, uint32_t size) {
+    if (!renderer || !ne_image_handle_valid(handle) || !data || size == 0) {
+        return;
+    }
+
+    uint32_t slot_index = handle - 1; /* Convert handle to index */
+
+    if (slot_index >= renderer->buffer_cap || !renderer->buffers[slot_index].occupied) {
+        NE_LOG_WARN("buffer_update called on invalid or destroyed buffer handle");
+        return;
+    }
+
+    /* Ensure we have a staging buffer for the update */
+    if (!ne_vk_ensure_staging_buffer(renderer, size)) {
+        NE_LOG_ERROR("failed to ensure staging buffer for buffer update");
+        return;
+    }
+
+    /* Copy the updated data into the staging buffer */
+    memcpy((uint8_t *)renderer->staging_mapped, data, size);
+
+    /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
+    VkMappedMemoryRange flush_range;
+    memset(&flush_range, 0, sizeof(flush_range));
+    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
+    flush_range.memory = renderer->staging_memory;
+    flush_range.offset = 0;
+    flush_range.size = VK_WHOLE_SIZE;
+
+    VkResult vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
+    }
+
+    /* Record the copy command */
+    VkCommandBufferBeginInfo begin_info;
+    memset(&begin_info, 0, sizeof(begin_info));
+    begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+    begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+
+    vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
+        return;
+    }
+
+    ne_cmd_transition_image_layout(renderer, renderer->transfer_cmd, handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
+    ne_cmd_copy_buffer_to_image(renderer, renderer->transfer_cmd, renderer->staging_buffer, handle);
+
+    /* Submit and wait for completion */
+    if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
+        NE_LOG_ERROR("failed to submit transfer command for buffer update");
+        return;
+    }
+
+    /* Reset the command buffer for reuse */
+    vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
+    }
+}
+
 void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
                       const void *data, uint32_t size, uint32_t offset) {
     if (!renderer || !ne_buffer_handle_valid(handle) || !data || size == 0) {
@@ -2255,6 +2609,50 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
+    }
+}
+
+void ne_image_destroy(NERenderer *renderer, NEImageHandle handle) {
+    if (!renderer || !ne_image_handle_valid(handle)) {
+        return;
+    }
+
+    uint32_t slot_index = handle - 1; /* Convert handle to index */
+
+    if (slot_index >= renderer->buffer_cap) {
+        return;
+    }
+
+    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+
+    if (!slot->occupied) {
+        return; /* Already destroyed or never existed */
+    }
+
+    /* Destroy the buffer and free its memory */
+    if (slot->image != VK_NULL_HANDLE && renderer->fns.vkDestroyImage) {
+        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        slot->image = VK_NULL_HANDLE;
+    }
+
+    if (slot->imageView != VK_NULL_HANDLE && renderer->fns.vkDestroyImageView) {
+        renderer->fns.vkDestroyImageView(renderer->device, slot->imageView, NULL);
+        slot->imageView = VK_NULL_HANDLE;
+    }
+
+    if (slot->memory != VK_NULL_HANDLE && renderer->fns.vkFreeMemory) {
+        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+        slot->memory = VK_NULL_HANDLE;
+    }
+
+    /* Mark the slot as unoccupied */
+    slot->occupied = false;
+    slot->usage = 0;
+    slot->size = 0;
+
+    /* Decrement the count */
+    if (renderer->buffer_count > 0) {
+        renderer->buffer_count--;
     }
 }
 

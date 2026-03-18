@@ -33,9 +33,10 @@ typedef enum NEBufferUsage {
     NE_BUFFER_USAGE_VERTEX  = 1u << 0,
     NE_BUFFER_USAGE_INDEX   = 1u << 1,
     NE_BUFFER_USAGE_UNIFORM = 1u << 2,
-
-    /** Read/write access from compute shaders. */
     NE_BUFFER_USAGE_STORAGE = 1u << 3,
+
+    NE_BUFFER_USAGE_IMAGE_STORAGE = 1u << 4,
+    NE_BUFFER_USAGE_IMAGE_SAMPLED = 1u << 5,
 } NEBufferUsage;
 
 /* ======================================================================== */
