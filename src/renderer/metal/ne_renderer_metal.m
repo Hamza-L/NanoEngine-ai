@@ -730,6 +730,11 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         return NE_BUFFER_HANDLE_NULL;
     }
 
+    if (!desc->usage) {
+        NE_LOG_ERROR("buffer creation requires at least one usage flag");
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
     id<MTLDevice> device = ne_renderer_get_device(renderer);
     if (!device) {
         return NE_BUFFER_HANDLE_NULL;
@@ -1080,6 +1085,12 @@ void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
     NERenderer *renderer = pass->surface->renderer;
     NEBufferSlot *slot = ne_buffer_update_validate(renderer, handle, data, size, offset);
     if (!slot) {
+        return;
+    }
+
+    if (!slot->dynamic) {
+        NE_LOG_WARN("ne_render_pass_update_buffer: buffer (id=%u) is not dynamic; "
+                    "create it with NEBufferDesc.dynamic = true", handle.id);
         return;
     }
 
