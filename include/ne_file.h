@@ -11,21 +11,16 @@ extern "C" {
 /**
  * Read an entire file into a heap-allocated buffer.
  *
- * The returned buffer is always null-terminated so it can be used directly as
- * a C string (useful for shader source).  The actual file size (excluding the
- * null terminator) is written to @p out_size when non-NULL.
- *
  * @param path      Absolute or relative file path.
- * @param out_size  Optional.  Receives the file size in bytes.
- * @return A pointer to the file contents, or NULL on failure.
- *         Free with ne_file_free().
+ * @param out_size  Optional.  Receives the file size in bytes. excludes null terminator
+ * @return A pointer to the null-terminated file contents, or NULL on failure. Free with ne_file_free().
  */
 void *ne_file_read(const char *path, size_t *out_size);
 
 /**
  * Write a block of data to a file, replacing any existing contents.
  *
- * @param path  Absolute or relative file path.
+ * @param path  file path.
  * @param data  Pointer to the data to write.
  * @param size  Number of bytes to write.
  * @return true on success, false on failure.
