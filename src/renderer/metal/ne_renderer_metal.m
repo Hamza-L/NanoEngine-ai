@@ -410,35 +410,51 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
     /* Block until a frame slot is available (at most NE_MTL_MAX_FRAMES_IN_FLIGHT in flight). */
     dispatch_semaphore_wait(surface->frame_semaphore, DISPATCH_TIME_FOREVER);
 
+    /*
+     * From here on, every failure path must release the frame slot we just
+     * acquired (NE_MTL_FRAME_ABORT) — otherwise the semaphore count leaks and,
+     * after NE_MTL_MAX_FRAMES_IN_FLIGHT such failures, begin_frame deadlocks.
+     * A nil `nextDrawable` is a normal occurrence during resize/occlusion, so
+     * this is a hot path, not a rare one.
+     *
+     * (ARC forbids `goto` past __strong locals, so this is a macro rather than a
+     * shared cleanup label.)
+     */
+#define NE_MTL_FRAME_ABORT()                                  \
+    do {                                                      \
+        dispatch_semaphore_signal(surface->frame_semaphore);  \
+        return NULL;                                          \
+    } while (0)
+
     CAMetalLayer *layer = ne_surface_get_layer(surface);
     if (!layer) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
 
     int32_t fb_w = 0;
     int32_t fb_h = 0;
     if (!ne_window_get_framebuffer_size(surface->window, &fb_w, &fb_h)) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
     if (fb_w <= 0 || fb_h <= 0) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
 
     layer.drawableSize = CGSizeMake((CGFloat)fb_w, (CGFloat)fb_h);
 
     id<CAMetalDrawable> drawable = [layer nextDrawable];
     if (!drawable) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
 
     id<MTLCommandQueue> queue = ne_renderer_get_queue(renderer);
     if (!queue) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
 
     id<MTLCommandBuffer> command_buffer = [queue commandBuffer];
     if (!command_buffer) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
 
     MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
@@ -450,7 +466,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
 
     id<MTLRenderCommandEncoder> enc = [command_buffer renderCommandEncoderWithDescriptor:rpd];
     if (!enc) {
-        return NULL;
+        NE_MTL_FRAME_ABORT();
     }
 
     /* Set a default viewport matching the framebuffer. */
@@ -471,6 +487,8 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
 
     g_active_pass.surface = surface;
     return &g_active_pass;
+
+#undef NE_MTL_FRAME_ABORT
 }
 
 void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
@@ -719,7 +737,8 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     }
 
     NEBufferSlot *slot = &renderer->buffers[index];
-    if (offset + size > slot->size) {
+    /* Overflow-safe bounds check: `offset + size` could wrap around uint32_t. */
+    if (size > slot->size || offset > slot->size - size) {
         NE_LOG_ERROR("buffer update out of bounds (offset=%u + size=%u > buffer_size=%u)",
                      offset, size, slot->size);
         return;
