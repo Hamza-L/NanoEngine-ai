@@ -24,11 +24,18 @@ CFLAGS += -DUNICODE -D_UNICODE
 
 SHADERS_DIR := $(BUILD_DIR)/shaders
 
+# --- Toolchain ------------------------------------------------------------
+# Use the MSVC-compatible clang driver so we link against the MSVC C runtime
+# and accept MSVC-style flags / .lib names below.
+LD := clang-cl
+
 # --- Link flags -----------------------------------------------------------
 # Win32 platform deps only (renderer backend comes later).
+# /Z7 embeds debug info; /MDd selects the debug DLL C runtime.
 # Keep MSVC-style .lib names. Use -Xlinker so clang doesn't require the .lib
 # to be present in the current working directory; the linker will resolve it
 # via its library search paths.
+LDFLAGS += /Z7 /MDd
 LDFLAGS += /link
 LDFLAGS += user32.lib
 LDFLAGS += gdi32.lib

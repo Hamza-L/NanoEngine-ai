@@ -1,5 +1,7 @@
+# Toolchain defaults are platform-neutral; platform makefiles (included below)
+# override LD/LDFLAGS as needed (e.g. Win32 uses the MSVC-style clang-cl driver).
 CC := clang
-LD := clang-cl
+LD := clang
 OBJC := clang
 
 # Public target name (what users type): no extension, consistent across platforms.
@@ -32,7 +34,7 @@ TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 
 CFLAGS := -std=c23 -g -DDEBUG -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
 OBJCFLAGS := -fobjc-arc
-LDFLAGS := /Z7 /MDd
+LDFLAGS :=
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
 SRC_C := src/main.c src/ne_log.c src/ne_file.c src/ne_alloc.c src/ne_command_recorder.c
