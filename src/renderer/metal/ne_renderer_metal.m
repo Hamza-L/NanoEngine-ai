@@ -82,7 +82,7 @@ struct NERenderSurface {
 
     /* Per-pass draw state (valid between begin_frame / end_frame). */
     uint32_t current_topology;        /* MTLPrimitiveType              */
-    void    *current_index_buffer;    /* id<MTLBuffer> — borrowed, not retained */
+    NEBufferHandle current_index_buffer;
     uint32_t current_index_type;      /* MTLIndexType                  */
 };
 
@@ -466,7 +466,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
 
     /* Reset per-pass draw state. */
     surface->current_topology = MTLPrimitiveTypeTriangle;
-    surface->current_index_buffer = NULL;
+    surface->current_index_buffer = NE_BUFFER_HANDLE_NULL;
     surface->current_index_type = MTLIndexTypeUInt16;
 
     g_active_pass.surface = surface;
@@ -938,14 +938,13 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot, NEBuffe
 void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer, NEIndexType type) {
     if (!pass || !pass->surface) return;
 
-    id<MTLBuffer> mtl_buf = ne_buffer_get(pass->surface->renderer, buffer);
-    if (!mtl_buf) {
+    if (!ne_buffer_get(pass->surface->renderer, buffer)) {
         NE_LOG_WARN("set_index_buffer: invalid buffer handle (id=%u)", buffer.id);
         return;
     }
 
     /* Store for use at draw_indexed time. Borrowed pointer — not retained. */
-    pass->surface->current_index_buffer = (__bridge void *)mtl_buf;
+    pass->surface->current_index_buffer = buffer;
     pass->surface->current_index_type = (type == NE_INDEX_TYPE_UINT32)
                                             ? (uint32_t)MTLIndexTypeUInt32
                                             : (uint32_t)MTLIndexTypeUInt16;
@@ -984,12 +983,12 @@ void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count,
     if (!enc) return;
 
     NERenderSurface *surface = pass->surface;
-    if (!surface->current_index_buffer) {
+    if (!surface->current_index_buffer.id) {
         NE_LOG_WARN("draw_indexed called without a bound index buffer");
         return;
     }
 
-    id<MTLBuffer> idx_buf = (__bridge id<MTLBuffer>)surface->current_index_buffer;
+    id<MTLBuffer> idx_buf = ne_buffer_get(pass->surface->renderer, surface->current_index_buffer);
     MTLIndexType idx_type = (MTLIndexType)surface->current_index_type;
     NSUInteger idx_size = (idx_type == MTLIndexTypeUInt32) ? 4 : 2;
 
