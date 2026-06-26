@@ -66,8 +66,7 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline);
  *              `NEPipelineDesc::vertex_layouts`).
  * - `buffer` : Buffer handle (must have NE_BUFFER_USAGE_VERTEX).
  */
-void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
-                                      NEBufferHandle buffer);
+void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot, NEBufferHandle buffer);
 
 /**
  * Bind an index buffer.

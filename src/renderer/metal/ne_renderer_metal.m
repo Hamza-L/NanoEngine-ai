@@ -941,7 +941,7 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
     pass->surface->current_topology = slot->topology;
 }
 
-void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint32_t slot, NEBufferHandle buffer) {
+void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot, NEBufferHandle buffer) {
     id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
     if (!enc) return;
 
@@ -969,8 +969,7 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer, 
                                             : (uint32_t)MTLIndexTypeUInt16;
 }
 
-void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
-                                     uint32_t slot, const void *data, uint32_t size) {
+void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, uint64_t slot, const void *data, size_t size) {
     id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
     if (!enc || !data || size == 0) return;
 
@@ -987,7 +986,7 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
     }
 }
 
-void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex, uint32_t vertex_count) {
+void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t vertex_count) {
     id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
     if (!enc) return;
 
@@ -996,8 +995,8 @@ void ne_render_pass_draw(NERenderPass *pass, uint32_t first_vertex, uint32_t ver
             vertexCount:vertex_count];
 }
 
-void ne_render_pass_draw_indexed(NERenderPass *pass, uint32_t index_count,
-                                 uint32_t first_index, int32_t vertex_offset) {
+void ne_render_pass_draw_indexed(NERenderPass *pass, uint64_t index_count,
+                                 uint64_t first_index, int64_t vertex_offset) {
     id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
     if (!enc) return;
 
@@ -1037,16 +1036,16 @@ void ne_compute_pass_set_pipeline(NEComputePass *pass, NEComputePipelineHandle p
     (void)pass; (void)pipeline;
 }
 
-void ne_compute_pass_set_storage_buffer(NEComputePass *pass, uint32_t slot, NEBufferHandle buffer) {
+void ne_compute_pass_set_storage_buffer(NEComputePass *pass, uint64_t slot, NEBufferHandle buffer) {
     (void)pass; (void)slot; (void)buffer;
 }
 
-void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint32_t slot,
+void ne_compute_pass_set_uniform_data(NEComputePass *pass, uint64_t slot,
                                       const void *data, uint32_t size) {
     (void)pass; (void)slot; (void)data; (void)size;
 }
 
-void ne_compute_pass_dispatch(NEComputePass *pass, uint32_t group_count_x,
-                              uint32_t group_count_y, uint32_t group_count_z) {
+void ne_compute_pass_dispatch(NEComputePass *pass, uint64_t group_count_x,
+                              uint64_t group_count_y, uint64_t group_count_z) {
     (void)pass; (void)group_count_x; (void)group_count_y; (void)group_count_z;
 }
