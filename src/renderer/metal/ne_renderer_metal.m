@@ -693,6 +693,13 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         return NE_BUFFER_HANDLE_NULL;
     }
 
+    /*
+     * StorageModeShared (CPU/GPU-coherent, no separate VRAM copy) is both
+     * correct and optimal on Apple Silicon's unified memory, which is our only
+     * macOS target. `ne_buffer_update` is therefore a plain memcpy into the
+     * buffer's contents — no staging buffer or blit is needed. (Discrete-GPU
+     * StorageModePrivate + staging is intentionally not supported.)
+     */
     id<MTLBuffer> buffer = nil;
     if (desc->initial_data) {
         buffer = [device newBufferWithBytes:desc->initial_data

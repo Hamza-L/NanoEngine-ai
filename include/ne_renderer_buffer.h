@@ -87,12 +87,20 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc);
 /**
  * Update a region of an existing buffer.
  *
+ * The update is applied immediately: when this call returns, the new contents
+ * are visible to all subsequent draws that use the buffer.
+ *
+ * Caller responsibility: do NOT update a buffer that may still be in use by an
+ * in-flight frame (one submitted but not yet completed by the GPU). Doing so
+ * races the GPU and yields undefined rendering. Safe update points are before
+ * the first frame, or for data not referenced by any in-flight frame. For
+ * small per-draw data that changes every frame, prefer the inline uniform path
+ * (`ne_render_pass_set_uniform_data`) instead of mutating a buffer.
+ *
  * Parameters:
  * - `data`   : Source data to copy.
  * - `size`   : Number of bytes to copy.
  * - `offset` : Byte offset into the buffer.
- *
- * The update is staged and applied before the next draw that uses the buffer.
  */
 void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
                       const void *data, uint32_t size, uint32_t offset);
