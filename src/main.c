@@ -82,8 +82,7 @@ int main(void) {
                                                  .width = 800,
                                                  .height = 600,
                                                  .resizable = true,
-                                                 .undecorated = true,
-                                                 .show_on_create = false});
+                                                 .show_on_create = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);
@@ -109,7 +108,7 @@ int main(void) {
 
     NERenderSurface *surface = ne_renderer_create_surface(renderer,
                                                           window,
-                                                          &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.01f, 0.01f, 0.015f, 0.5f}});
+                                                          &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.12f, 1.0f}});
     if (!surface) {
         NE_LOG_ERROR("failed to create render surface");
         ne_renderer_destroy(renderer);
