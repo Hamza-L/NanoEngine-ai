@@ -54,8 +54,10 @@ struct NEWindow {
     /* UTF-16 surrogate tracking for WM_CHAR text input. */
     uint16_t pending_high_surrogate;
 
-    void (*recordFrame)(void);
     void (*presentFrame)(void);
+
+    void (*renderFrame)(void *user);
+    void *renderFrameUser;
 };
 
 static wchar_t *ne_utf8_to_wide(const char *utf8) {
@@ -291,7 +293,8 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
             window->callbacks.on_resize(window, w, h, window->user_data);
         }
 
-        if(window->recordFrame) window->recordFrame();
+        /* Redraw during the modal resize loop, which blocks the main loop. */
+        if (window->renderFrame) window->renderFrame(window->renderFrameUser);
         return 0;
 
     case WM_MOVE:
@@ -814,6 +817,10 @@ void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void))
     window->presentFrame = presentFrame;
 }
 
-void ne_set_window_record_frame_dispatch(NEWindow *window, void(*renderFrame)(void)) {
-    window->recordFrame = renderFrame;
+void ne_set_window_render_dispatch(NEWindow *window, void(*render)(void *user), void *user) {
+    if (!window) {
+        return;
+    }
+    window->renderFrame = render;
+    window->renderFrameUser = user;
 }

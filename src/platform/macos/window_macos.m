@@ -32,6 +32,9 @@ struct NEWindow {
     bool open;
     bool destroying;
 
+    void (*render_frame)(void *user);
+    void *render_frame_user;
+
     uint32_t mouse_buttons_down_mask;
 
     float last_mouse_x;
@@ -302,13 +305,20 @@ static void ne_emit_mouse_button(NEWindow *window, NSEvent *event, bool is_down,
 }
 
 - (void)windowDidResize:(NSNotification *)notification {
-    if (!self.owner || !self.owner->callbacks.on_resize) {
+    if (!self.owner) {
         return;
     }
-    NSWindow *w = [notification object];
-    NSRect content = [w contentRectForFrameRect:[w frame]];
-    self.owner->callbacks.on_resize(self.owner, (int32_t)content.size.width, (int32_t)content.size.height,
-                                    self.owner->user_data);
+    if (self.owner->callbacks.on_resize) {
+        NSWindow *w = [notification object];
+        NSRect content = [w contentRectForFrameRect:[w frame]];
+        self.owner->callbacks.on_resize(self.owner, (int32_t)content.size.width, (int32_t)content.size.height,
+                                        self.owner->user_data);
+    }
+
+    /* Redraw during the live resize, which otherwise blocks the main loop. */
+    if (self.owner->render_frame) {
+        self.owner->render_frame(self.owner->render_frame_user);
+    }
 }
 
 - (void)windowDidMove:(NSNotification *)notification {
@@ -724,6 +734,14 @@ void ne_window_set_callbacks(NEWindow *window, const NEWindowCallbacks *callback
         memset(&window->callbacks, 0, sizeof(window->callbacks));
     }
     window->user_data = user_data;
+}
+
+void ne_set_window_render_dispatch(NEWindow *window, void(*render)(void *user), void *user) {
+    if (!window) {
+        return;
+    }
+    window->render_frame = render;
+    window->render_frame_user = user;
 }
 
 bool ne_window_get_content_size(const NEWindow *window, int32_t *out_width, int32_t *out_height) {

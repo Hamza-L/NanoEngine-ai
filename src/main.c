@@ -1,9 +1,9 @@
 #include "ne_app.h"
 #include "ne_file.h"
+#include "ne_frame.h"
 #include "ne_log.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
-#include "ne_renderer_pass.h"
 #include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
@@ -222,15 +222,27 @@ int main(void) {
 
     NE_LOG_INFO("triangle demo initialized — press Escape to quit");
 
+    /* ── Frame context ─────────────────────────────────────────────────── */
+    /* Single source of truth for what a frame draws. Registering it as the
+     * window render dispatch lets the platform layer redraw during a live
+     * resize (when the OS event loop blocks this main loop). */
+    NEFrameContext frame_ctx = {
+        .renderer = renderer,
+        .surface = surface,
+        .pipeline = pipeline,
+        .vertex_buffer = vbo,
+        .vertex_count = 3,
+    };
+    ne_set_window_render_dispatch(window, ne_render_frame, &frame_ctx);
+
     /* ── Main loop ─────────────────────────────────────────────────────── */
 
     while (ne_window_is_open(window) && ne_app_poll_events(app)) {
-        NERenderPass *pass = ne_renderer_begin_frame(renderer, surface);
-        ne_render_pass_set_pipeline(pass, pipeline);
-        ne_render_pass_set_vertex_buffer(pass, 0, vbo);
-        ne_render_pass_draw(pass, 0, 3);
-        ne_renderer_end_frame(renderer, pass);
+        ne_render_frame(&frame_ctx);
     }
+
+    /* Avoid a dangling dispatch pointer into stack memory after the loop. */
+    ne_set_window_render_dispatch(window, NULL, NULL);
 
     /* ── Cleanup ───────────────────────────────────────────────────────── */
 

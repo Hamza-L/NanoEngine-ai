@@ -476,7 +476,17 @@ void ne_window_invalidate(const NEWindow *window);
 
 void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void));
 
-void ne_set_window_record_frame_dispatch(NEWindow *window, void(*renderFrame)(void));
+/**
+ * Register a callback the platform layer invokes to redraw the window outside
+ * the normal frame loop — e.g. during a live resize, when the OS event loop
+ * blocks the main loop.
+ *
+ * `render` is called as `render(user)`; `user` is passed back verbatim and is
+ * not retained or interpreted by the window. Pass NULL `render` to clear.
+ *
+ * The window depends only on this generic signature, never on the renderer.
+ */
+void ne_set_window_render_dispatch(NEWindow *window, void(*render)(void *user), void *user);
 
 #ifdef __cplusplus
 }
