@@ -99,6 +99,27 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage,
                                      uint64_t slot, const void *data, size_t size);
 
 /**
+ * Update a dynamic buffer's contents for the current frame.
+ *
+ * Writes the copy bound to this frame on the pass's surface timeline, so the
+ * update neither stalls nor races the GPU (which may still be reading a prior
+ * frame's copy). Use this for per-frame data in a buffer created with
+ * `NEBufferDesc.dynamic == true`.
+ *
+ * Because only the current frame's copy is written, a dynamic buffer must be
+ * updated every frame before it is drawn — the other copies hold prior frames'
+ * data. For static/one-time uploads use `ne_buffer_update` instead.
+ *
+ * Parameters:
+ * - `handle` : Buffer to update (should be dynamic).
+ * - `data`   : Source data to copy.
+ * - `size`   : Number of bytes to copy.
+ * - `offset` : Byte offset into the buffer.
+ */
+void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
+                                  const void *data, uint32_t size, uint32_t offset);
+
+/**
  * Issue a non-indexed draw call.
  *
  * Parameters:

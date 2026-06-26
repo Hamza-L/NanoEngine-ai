@@ -59,6 +59,22 @@ typedef struct NEBufferDesc {
      * If NULL, the buffer contents are undefined.
      */
     const void *initial_data;
+
+    /**
+     * Hint that the buffer is updated per frame.
+     *
+     * When false (default), the buffer holds a single copy: cheap, shareable
+     * across surfaces, intended for static data set once (e.g. via
+     * `initial_data`). Update only outside an in-flight frame.
+     *
+     * When true, the backend keeps one copy per in-flight frame so the buffer
+     * can be updated every frame without stalling or racing the GPU. Update it
+     * via `ne_render_pass_update_buffer` (which targets the current frame's
+     * copy). A dynamic buffer is bound to the timeline of the surface it is
+     * drawn with and must be updated every frame before it is used; it is not
+     * intended to be shared across surfaces.
+     */
+    bool dynamic;
 } NEBufferDesc;
 
 /* ======================================================================== */

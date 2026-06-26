@@ -34,10 +34,16 @@ typedef struct NEShaderSlot {
 
 typedef struct NEBufferSlot {
     bool occupied;
+    bool dynamic;          /* true: per-frame copies, safe to update while GPU reads another */
     uint32_t usage;
     uint32_t size;
-    void *buffer;      /* id<MTLBuffer>   */
+    void *copies[NE_MTL_MAX_FRAMES_IN_FLIGHT]; /* id<MTLBuffer>; dynamic uses all, static uses [0] */
 } NEBufferSlot;
+
+/* Copies a buffer slot holds: one per in-flight frame if dynamic, else one. */
+static inline uint32_t ne_buffer_slot_copy_count(const NEBufferSlot *slot) {
+    return slot->dynamic ? (uint32_t)NE_MTL_MAX_FRAMES_IN_FLIGHT : 1u;
+}
 
 typedef struct NEPipelineSlot {
     bool occupied;
@@ -79,6 +85,15 @@ struct NERenderSurface {
 
     /* Frame pacing: limits how far the CPU can get ahead of the GPU. */
     dispatch_semaphore_t frame_semaphore;
+
+    /*
+     * Per-surface frame ring index (0 .. NE_MTL_MAX_FRAMES_IN_FLIGHT-1),
+     * advanced once per begin_frame. Selects which copy of a dynamic buffer to
+     * write/bind this frame. Each surface paces independently, so the index
+     * lives on the surface, not the renderer — this is what lets N surfaces
+     * render on independent timelines.
+     */
+    uint32_t frame_index;
 
     /* Per-pass draw state (valid between begin_frame / end_frame). */
     uint32_t current_topology;        /* MTLPrimitiveType              */
@@ -157,6 +172,17 @@ static void ne_shader_slot_release(NEShaderSlot *slot) {
     slot->occupied = false;
 }
 
+/* Release every MTLBuffer copy held by a buffer slot and clear it. */
+static void ne_buffer_slot_release(NEBufferSlot *slot) {
+    for (uint32_t i = 0; i < NE_MTL_MAX_FRAMES_IN_FLIGHT; i++) {
+        if (slot->copies[i]) {
+            (void)CFBridgingRelease(slot->copies[i]);
+            slot->copies[i] = NULL;
+        }
+    }
+    slot->occupied = false;
+}
+
 /* ── Pool-aware lookup helpers ──────────────────────────────────────────── */
 
 static id<MTLFunction> ne_shader_get_function(const NERenderer *renderer, NEShaderHandle handle) {
@@ -166,11 +192,19 @@ static id<MTLFunction> ne_shader_get_function(const NERenderer *renderer, NEShad
     return (__bridge id<MTLFunction>)renderer->shaders[index].function;
 }
 
-static id<MTLBuffer> ne_buffer_get(const NERenderer *renderer, NEBufferHandle handle) {
+/*
+ * Resolve a buffer handle to the MTLBuffer copy for a given frame.
+ * Static buffers have a single copy (frame_index is ignored); dynamic buffers
+ * select copy[frame_index % copy_count]. Pass frame_index 0 outside a frame.
+ */
+static id<MTLBuffer> ne_buffer_get_for_frame(const NERenderer *renderer, NEBufferHandle handle,
+                                             uint32_t frame_index) {
     if (!ne_buffer_handle_valid(handle)) return nil;
     uint32_t index = handle.id - 1;
     if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) return nil;
-    return (__bridge id<MTLBuffer>)renderer->buffers[index].buffer;
+    const NEBufferSlot *slot = &renderer->buffers[index];
+    uint32_t copy = frame_index % ne_buffer_slot_copy_count(slot);
+    return (__bridge id<MTLBuffer>)slot->copies[copy];
 }
 
 static id<MTLDevice> ne_renderer_get_device(const NERenderer *renderer) {
@@ -233,8 +267,8 @@ void ne_renderer_destroy(NERenderer *renderer) {
 
     /* Release all live buffers. */
     for (uint32_t i = 0; i < renderer->buffer_cap; i++) {
-        if (renderer->buffers[i].occupied && renderer->buffers[i].buffer) {
-            (void)CFBridgingRelease(renderer->buffers[i].buffer);
+        if (renderer->buffers[i].occupied) {
+            ne_buffer_slot_release(&renderer->buffers[i]);
         }
     }
     free(renderer->buffers);
@@ -480,6 +514,14 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
     surface->command_buffer = (__bridge_retained void *)command_buffer;
     surface->encoder = (__bridge_retained void *)enc;
 
+    /*
+     * Advance this surface's frame ring index. The semaphore wait above already
+     * bounded us to NE_MTL_MAX_FRAMES_IN_FLIGHT frames in flight, so the copy we
+     * roll onto is one the GPU has finished with. Dynamic-buffer updates/binds
+     * this frame target this index.
+     */
+    surface->frame_index = (surface->frame_index + 1u) % NE_MTL_MAX_FRAMES_IN_FLIGHT;
+
     /* Reset per-pass draw state. */
     surface->current_topology = MTLPrimitiveTypeTriangle;
     surface->current_index_buffer = NE_BUFFER_HANDLE_NULL;
@@ -696,25 +738,16 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     /*
      * StorageModeShared (CPU/GPU-coherent, no separate VRAM copy) is both
      * correct and optimal on Apple Silicon's unified memory, which is our only
-     * macOS target. `ne_buffer_update` is therefore a plain memcpy into the
-     * buffer's contents — no staging buffer or blit is needed. (Discrete-GPU
-     * StorageModePrivate + staging is intentionally not supported.)
+     * macOS target. Updates are therefore a plain memcpy into the buffer's
+     * contents — no staging buffer or blit. (Discrete-GPU StorageModePrivate +
+     * staging is intentionally not supported.)
+     *
+     * Dynamic buffers allocate one copy per in-flight frame so the CPU can
+     * write next frame's copy while the GPU still reads the current one — no
+     * stall, no race. The copy is selected per frame by the owning surface's
+     * frame_index (see ne_render_pass_update_buffer / ne_buffer_get_for_frame).
+     * Static buffers allocate a single shared copy.
      */
-    id<MTLBuffer> buffer = nil;
-    if (desc->initial_data) {
-        buffer = [device newBufferWithBytes:desc->initial_data
-                                    length:desc->size
-                                   options:MTLResourceStorageModeShared];
-    } else {
-        buffer = [device newBufferWithLength:desc->size
-                                    options:MTLResourceStorageModeShared];
-    }
-
-    if (!buffer) {
-        NE_LOG_ERROR("failed to create Metal buffer (%u bytes)", desc->size);
-        return NE_BUFFER_HANDLE_NULL;
-    }
-
     uint32_t index = ne_pool_alloc((void **)&renderer->buffers, &renderer->buffer_cap, sizeof(NEBufferSlot));
     if (index == UINT32_MAX) {
         NE_LOG_ERROR("buffer pool allocation failed");
@@ -723,24 +756,47 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
 
     NEBufferSlot *slot = &renderer->buffers[index];
     slot->occupied = true;
+    slot->dynamic = desc->dynamic;
     slot->usage = desc->usage;
     slot->size = desc->size;
-    slot->buffer = (__bridge_retained void *)buffer;
+
+    const uint32_t copy_count = ne_buffer_slot_copy_count(slot);
+    for (uint32_t i = 0; i < copy_count; i++) {
+        id<MTLBuffer> buffer = nil;
+        if (desc->initial_data) {
+            buffer = [device newBufferWithBytes:desc->initial_data
+                                         length:desc->size
+                                        options:MTLResourceStorageModeShared];
+        } else {
+            buffer = [device newBufferWithLength:desc->size
+                                         options:MTLResourceStorageModeShared];
+        }
+
+        if (!buffer) {
+            NE_LOG_ERROR("failed to create Metal buffer (%u bytes)", desc->size);
+            ne_buffer_slot_release(slot); /* releases copies created so far */
+            return NE_BUFFER_HANDLE_NULL;
+        }
+        slot->copies[i] = (__bridge_retained void *)buffer;
+    }
+
     renderer->buffer_count++;
 
     return (NEBufferHandle){ .id = index + 1 };
 }
 
-void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
-                      const void *data, uint32_t size, uint32_t offset) {
+/* Validate a buffer slot for an update and bounds-check the region.
+ * Returns the slot, or NULL (with a log) on any failure. */
+static NEBufferSlot *ne_buffer_update_validate(NERenderer *renderer, NEBufferHandle handle,
+                                               const void *data, uint32_t size, uint32_t offset) {
     if (!renderer || !ne_buffer_handle_valid(handle) || !data || size == 0) {
-        return;
+        return NULL;
     }
 
     uint32_t index = handle.id - 1;
     if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) {
         NE_LOG_WARN("attempted to update invalid buffer handle (id=%u)", handle.id);
-        return;
+        return NULL;
     }
 
     NEBufferSlot *slot = &renderer->buffers[index];
@@ -748,11 +804,39 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     if (size > slot->size || offset > slot->size - size) {
         NE_LOG_ERROR("buffer update out of bounds (offset=%u + size=%u > buffer_size=%u)",
                      offset, size, slot->size);
+        return NULL;
+    }
+    return slot;
+}
+
+static void ne_buffer_copy_write(NEBufferSlot *slot, uint32_t copy,
+                                 const void *data, uint32_t size, uint32_t offset) {
+    id<MTLBuffer> buffer = (__bridge id<MTLBuffer>)slot->copies[copy];
+    memcpy((uint8_t *)[buffer contents] + offset, data, size);
+}
+
+void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
+                      const void *data, uint32_t size, uint32_t offset) {
+    NEBufferSlot *slot = ne_buffer_update_validate(renderer, handle, data, size, offset);
+    if (!slot) {
         return;
     }
 
-    id<MTLBuffer> buffer = (__bridge id<MTLBuffer>)slot->buffer;
-    memcpy((uint8_t *)[buffer contents] + offset, data, size);
+    /*
+     * Renderer-scoped update: intended for static/one-time setup (no frame
+     * context). For a dynamic buffer we have no surface frame_index here, so we
+     * write ALL copies to keep them consistent. This is only safe outside an
+     * in-flight frame (e.g. before the first frame). Per-frame dynamic updates
+     * must use ne_render_pass_update_buffer instead.
+     */
+    if (slot->dynamic) {
+        NE_LOG_WARN("ne_buffer_update on a dynamic buffer writes all copies; "
+                    "use ne_render_pass_update_buffer for per-frame updates");
+    }
+    const uint32_t copy_count = ne_buffer_slot_copy_count(slot);
+    for (uint32_t i = 0; i < copy_count; i++) {
+        ne_buffer_copy_write(slot, i, data, size, offset);
+    }
 }
 
 void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
@@ -766,12 +850,7 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return;
     }
 
-    NEBufferSlot *slot = &renderer->buffers[index];
-    if (slot->buffer) {
-        (void)CFBridgingRelease(slot->buffer);
-        slot->buffer = NULL;
-    }
-    slot->occupied = false;
+    ne_buffer_slot_release(&renderer->buffers[index]);
     renderer->buffer_count--;
 }
 
@@ -952,7 +1031,8 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot, NEBuffe
     id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
     if (!enc) return;
 
-    id<MTLBuffer> mtl_buf = ne_buffer_get(pass->surface->renderer, buffer);
+    id<MTLBuffer> mtl_buf = ne_buffer_get_for_frame(pass->surface->renderer, buffer,
+                                                    pass->surface->frame_index);
     if (!mtl_buf) {
         NE_LOG_WARN("set_vertex_buffer: invalid buffer handle (id=%u)", buffer.id);
         return;
@@ -964,7 +1044,7 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot, NEBuffe
 void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer, NEIndexType type) {
     if (!pass || !pass->surface) return;
 
-    if (!ne_buffer_get(pass->surface->renderer, buffer)) {
+    if (!ne_buffer_get_for_frame(pass->surface->renderer, buffer, pass->surface->frame_index)) {
         NE_LOG_WARN("set_index_buffer: invalid buffer handle (id=%u)", buffer.id);
         return;
     }
@@ -993,6 +1073,26 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, ui
     }
 }
 
+void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
+                                  const void *data, uint32_t size, uint32_t offset) {
+    if (!pass || !pass->surface) return;
+
+    NERenderer *renderer = pass->surface->renderer;
+    NEBufferSlot *slot = ne_buffer_update_validate(renderer, handle, data, size, offset);
+    if (!slot) {
+        return;
+    }
+
+    /*
+     * Write only the copy bound for this frame. The semaphore-bounded ring
+     * guarantees the GPU is no longer reading this copy, so the write neither
+     * stalls nor races. A dynamic buffer must be updated every frame before it
+     * is drawn — the other copies hold prior frames' data.
+     */
+    uint32_t copy = pass->surface->frame_index % ne_buffer_slot_copy_count(slot);
+    ne_buffer_copy_write(slot, copy, data, size, offset);
+}
+
 void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t vertex_count) {
     id<MTLRenderCommandEncoder> enc = ne_pass_get_encoder(pass);
     if (!enc) return;
@@ -1013,7 +1113,9 @@ void ne_render_pass_draw_indexed(NERenderPass *pass, uint64_t index_count,
         return;
     }
 
-    id<MTLBuffer> idx_buf = ne_buffer_get(pass->surface->renderer, surface->current_index_buffer);
+    id<MTLBuffer> idx_buf = ne_buffer_get_for_frame(pass->surface->renderer,
+                                                    surface->current_index_buffer,
+                                                    surface->frame_index);
     MTLIndexType idx_type = (MTLIndexType)surface->current_index_type;
     NSUInteger idx_size = (idx_type == MTLIndexTypeUInt32) ? 4 : 2;
 

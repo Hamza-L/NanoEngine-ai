@@ -159,6 +159,7 @@ enum {
 
 typedef struct NEVulkanBufferSlot {
     bool occupied;
+    bool dynamic;          /* true: per-frame host-visible copies (no stall, no race) */
     uint32_t usage;
     union {
         uint32_t size;
@@ -176,7 +177,27 @@ typedef struct NEVulkanBufferSlot {
         };
     };
     VkDeviceMemory memory;
+
+    /*
+     * Dynamic buffers only: one host-visible + coherent, persistently-mapped
+     * copy per in-flight frame. The CPU writes mapped[frame] directly (no
+     * staging buffer, no transfer, no stall) while the GPU reads another copy.
+     * Static buffers leave these zeroed and use `buffer`/`memory` above
+     * (device-local + staged upload).
+     */
+    VkBuffer dyn_buffers[NE_VK_MAX_FRAMES_IN_FLIGHT];
+    VkDeviceMemory dyn_memories[NE_VK_MAX_FRAMES_IN_FLIGHT];
+    void *dyn_mapped[NE_VK_MAX_FRAMES_IN_FLIGHT];
 } NEVulkanBufferSlot;
+
+/* Select the VkBuffer a slot exposes for a given frame: the per-frame copy for
+ * dynamic buffers, or the single device-local buffer for static ones. */
+static VkBuffer ne_vk_buffer_for_frame(const NEVulkanBufferSlot *slot, uint32_t frame_index) {
+    if (slot->dynamic) {
+        return slot->dyn_buffers[frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT];
+    }
+    return slot->buffer;
+}
 
 /* ── Shader resource pool ───────────────────────────────────────────────── */
 
@@ -908,6 +929,56 @@ static uint32_t ne_vk_find_memory_type(NERenderer *r, uint32_t type_filter,
     return UINT32_MAX;
 }
 
+/* Free all Vulkan resources a slot owns. Handles the three slot shapes that
+ * share this pool/union: images, dynamic buffers (N mapped copies), and static
+ * buffers. Does not touch occupied/usage/size bookkeeping. */
+static void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
+    /* Image slots alias `buffer` with `image` in the union; free them as images
+     * (this also releases the imageView, which the buffer path would leak). */
+    if (slot->usage & (NE_BUFFER_USAGE_IMAGE_STORAGE | NE_BUFFER_USAGE_IMAGE_SAMPLED)) {
+        if (slot->image != VK_NULL_HANDLE && r->fns.vkDestroyImage) {
+            r->fns.vkDestroyImage(r->device, slot->image, NULL);
+            slot->image = VK_NULL_HANDLE;
+        }
+        if (slot->imageView != VK_NULL_HANDLE && r->fns.vkDestroyImageView) {
+            r->fns.vkDestroyImageView(r->device, slot->imageView, NULL);
+            slot->imageView = VK_NULL_HANDLE;
+        }
+        if (slot->memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
+            r->fns.vkFreeMemory(r->device, slot->memory, NULL);
+            slot->memory = VK_NULL_HANDLE;
+        }
+        return;
+    }
+
+    if (slot->dynamic) {
+        for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+            if (slot->dyn_mapped[i]) {
+                r->fns.vkUnmapMemory(r->device, slot->dyn_memories[i]);
+                slot->dyn_mapped[i] = NULL;
+            }
+            if (slot->dyn_buffers[i] != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
+                r->fns.vkDestroyBuffer(r->device, slot->dyn_buffers[i], NULL);
+                slot->dyn_buffers[i] = VK_NULL_HANDLE;
+            }
+            if (slot->dyn_memories[i] != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
+                r->fns.vkFreeMemory(r->device, slot->dyn_memories[i], NULL);
+                slot->dyn_memories[i] = VK_NULL_HANDLE;
+            }
+        }
+        return;
+    }
+
+    if (slot->buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
+        r->fns.vkDestroyBuffer(r->device, slot->buffer, NULL);
+        slot->buffer = VK_NULL_HANDLE;
+    }
+    if (slot->memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
+        r->fns.vkFreeMemory(r->device, slot->memory, NULL);
+        slot->memory = VK_NULL_HANDLE;
+    }
+}
+
 /**
  * Ensure the staging buffer exists with at least the requested size.
  * Creates or resizes the staging buffer as needed.
@@ -1504,12 +1575,7 @@ void ne_renderer_destroy(NERenderer *r) {
     /* Destroy all live buffers. */
     for (uint32_t i = 0; i < r->buffer_cap; i++) {
         if (r->buffers[i].occupied) {
-            if (r->buffers[i].buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
-                r->fns.vkDestroyBuffer(r->device, r->buffers[i].buffer, NULL);
-            }
-            if (r->buffers[i].memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
-                r->fns.vkFreeMemory(r->device, r->buffers[i].memory, NULL);
-            }
+            ne_vk_buffer_slot_free(r, &r->buffers[i]);
         }
     }
     free(r->buffers);
@@ -2042,6 +2108,102 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         vk_usage |= VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
     }
 
+    /*
+     * Dynamic path: one host-visible + coherent, persistently-mapped buffer per
+     * in-flight frame. The CPU writes mapped[frame] directly each frame (no
+     * staging, no transfer, no stall) while the GPU reads another frame's copy.
+     * This mirrors the Metal backend's per-frame dynamic buffering and is the
+     * idiomatic equivalent of Metal's StorageModeShared for dynamic data.
+     */
+    if (desc->dynamic) {
+        slot->dynamic = true;
+        slot->usage = desc->usage;
+        slot->size = desc->size;
+
+        /* Host-visible dynamic buffers are written directly, not transfer
+         * targets; drop TRANSFER_DST (it was added unconditionally above). */
+        const VkBufferUsageFlags dyn_usage = vk_usage & ~(VkBufferUsageFlags)VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+
+        for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+            VkBufferCreateInfo dbi;
+            memset(&dbi, 0, sizeof(dbi));
+            dbi.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+            dbi.size = desc->size;
+            dbi.usage = dyn_usage;
+            dbi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+
+            VkResult dvr = renderer->fns.vkCreateBuffer(renderer->device, &dbi, NULL, &slot->dyn_buffers[i]);
+            if (dvr != VK_SUCCESS || slot->dyn_buffers[i] == VK_NULL_HANDLE) {
+                NE_LOG_ERROR("vkCreateBuffer (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
+                goto dynamic_fail;
+            }
+
+            VkMemoryRequirements dmr;
+            renderer->fns.vkGetBufferMemoryRequirements(renderer->device, slot->dyn_buffers[i], &dmr);
+
+            uint32_t dmt = ne_vk_find_memory_type(
+                renderer, dmr.memoryTypeBits,
+                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT);
+            if (dmt == UINT32_MAX) {
+                NE_LOG_ERROR("no host-visible memory type for dynamic buffer");
+                goto dynamic_fail;
+            }
+
+            VkMemoryAllocateInfo dai;
+            memset(&dai, 0, sizeof(dai));
+            dai.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
+            dai.allocationSize = dmr.size;
+            dai.memoryTypeIndex = dmt;
+
+            dvr = renderer->fns.vkAllocateMemory(renderer->device, &dai, NULL, &slot->dyn_memories[i]);
+            if (dvr != VK_SUCCESS || slot->dyn_memories[i] == VK_NULL_HANDLE) {
+                NE_LOG_ERROR("vkAllocateMemory (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
+                goto dynamic_fail;
+            }
+
+            dvr = renderer->fns.vkBindBufferMemory(renderer->device, slot->dyn_buffers[i], slot->dyn_memories[i], 0);
+            if (dvr != VK_SUCCESS) {
+                NE_LOG_ERROR("vkBindBufferMemory (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
+                goto dynamic_fail;
+            }
+
+            dvr = renderer->fns.vkMapMemory(renderer->device, slot->dyn_memories[i], 0, desc->size, 0, &slot->dyn_mapped[i]);
+            if (dvr != VK_SUCCESS || !slot->dyn_mapped[i]) {
+                NE_LOG_ERROR("vkMapMemory (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
+                goto dynamic_fail;
+            }
+
+            /* Seed every copy with initial data so the buffer is valid before
+             * the first per-frame update. */
+            if (desc->initial_data) {
+                memcpy(slot->dyn_mapped[i], desc->initial_data, desc->size);
+            }
+        }
+
+        slot->occupied = true;
+        return (NEBufferHandle){ slot_index + 1 };
+
+    dynamic_fail:
+        /* Release any dynamic resources created before the failure. */
+        for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+            if (slot->dyn_mapped[i]) {
+                renderer->fns.vkUnmapMemory(renderer->device, slot->dyn_memories[i]);
+                slot->dyn_mapped[i] = NULL;
+            }
+            if (slot->dyn_memories[i] != VK_NULL_HANDLE) {
+                renderer->fns.vkFreeMemory(renderer->device, slot->dyn_memories[i], NULL);
+                slot->dyn_memories[i] = VK_NULL_HANDLE;
+            }
+            if (slot->dyn_buffers[i] != VK_NULL_HANDLE) {
+                renderer->fns.vkDestroyBuffer(renderer->device, slot->dyn_buffers[i], NULL);
+                slot->dyn_buffers[i] = VK_NULL_HANDLE;
+            }
+        }
+        slot->occupied = false;
+        slot->dynamic = false;
+        return NE_BUFFER_HANDLE_NULL;
+    }
+
     /* Create the GPU buffer */
     VkBufferCreateInfo buf_info;
     memset(&buf_info, 0, sizeof(buf_info));
@@ -2555,6 +2717,31 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
 
     NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
 
+    /* Overflow-safe bounds check: `offset + size` could wrap around uint32_t. */
+    if (size > slot->size || offset > slot->size - size) {
+        NE_LOG_ERROR("buffer update out of bounds (offset=%u + size=%u > buffer_size=%u)",
+                     offset, size, slot->size);
+        return;
+    }
+
+    /*
+     * Renderer-scoped update: intended for static/one-time setup (no frame
+     * context). For a dynamic buffer we have no surface frame_index here, so we
+     * write ALL mapped copies to keep them consistent. This is only safe
+     * outside an in-flight frame. Per-frame dynamic updates must use
+     * ne_render_pass_update_buffer instead.
+     */
+    if (slot->dynamic) {
+        NE_LOG_WARN("ne_buffer_update on a dynamic buffer writes all copies; "
+                    "use ne_render_pass_update_buffer for per-frame updates");
+        for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+            if (slot->dyn_mapped[i]) {
+                memcpy((uint8_t *)slot->dyn_mapped[i] + offset, data, size);
+            }
+        }
+        return;
+    }
+
     /* Ensure we have a staging buffer for the update */
     if (!ne_vk_ensure_staging_buffer(renderer, offset + size)) {
         NE_LOG_ERROR("failed to ensure staging buffer for buffer update");
@@ -2671,16 +2858,7 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return; /* Already destroyed or never existed */
     }
 
-    /* Destroy the buffer and free its memory */
-    if (slot->buffer != VK_NULL_HANDLE && renderer->fns.vkDestroyBuffer) {
-        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
-        slot->buffer = VK_NULL_HANDLE;
-    }
-
-    if (slot->memory != VK_NULL_HANDLE && renderer->fns.vkFreeMemory) {
-        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
-        slot->memory = VK_NULL_HANDLE;
-    }
+    ne_vk_buffer_slot_free(renderer, slot);
 
     /* Mark the slot as unoccupied */
     slot->occupied = false;
@@ -3461,7 +3639,7 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
         return;
     }
 
-    VkBuffer vk_buffer = r->buffers[buf_index].buffer;
+    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&r->buffers[buf_index], pass->surface->sc.frame_index);
     VkDeviceSize offset = 0;
 
     r->fns.vkCmdBindVertexBuffers(pass->cmd, slot, 1, &vk_buffer, &offset);
@@ -3484,7 +3662,7 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
         return;
     }
 
-    VkBuffer vk_buffer = r->buffers[buf_index].buffer;
+    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&r->buffers[buf_index], pass->surface->sc.frame_index);
     VkIndexType vk_type = (type == NE_INDEX_TYPE_UINT32) ? VK_INDEX_TYPE_UINT32
                                                          : VK_INDEX_TYPE_UINT16;
 
@@ -3528,6 +3706,45 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, ui
     }
 
     r->fns.vkCmdPushConstants(pass->cmd, pass->bound_layout, stage_flags, 0, size, data);
+}
+
+void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
+                                  const void *data, uint32_t size, uint32_t offset) {
+    if (!pass || !pass->surface || !data || size == 0 || !ne_buffer_handle_valid(handle)) {
+        return;
+    }
+
+    NERenderer *r = pass->surface->renderer;
+    const uint32_t buf_index = handle - 1;
+    if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
+        NE_LOG_WARN("ne_render_pass_update_buffer: invalid buffer handle (id=%u)", handle);
+        return;
+    }
+
+    NEVulkanBufferSlot *slot = &r->buffers[buf_index];
+
+    /* Overflow-safe bounds check: `offset + size` could wrap around uint32_t. */
+    if (size > slot->size || offset > slot->size - size) {
+        NE_LOG_ERROR("buffer update out of bounds (offset=%u + size=%u > buffer_size=%u)",
+                     offset, size, slot->size);
+        return;
+    }
+
+    if (!slot->dynamic) {
+        NE_LOG_WARN("ne_render_pass_update_buffer: buffer (id=%u) is not dynamic; "
+                    "create it with NEBufferDesc.dynamic = true", handle);
+        return;
+    }
+
+    /*
+     * Write only this frame's copy. The fence wait in begin_frame guarantees the
+     * GPU has finished the copy at this frame index, so the write neither stalls
+     * nor races. Memory is host-coherent, so no explicit flush is needed.
+     */
+    const uint32_t frame = pass->surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
+    if (slot->dyn_mapped[frame]) {
+        memcpy((uint8_t *)slot->dyn_mapped[frame] + offset, data, size);
+    }
 }
 
 void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t vertex_count) {
