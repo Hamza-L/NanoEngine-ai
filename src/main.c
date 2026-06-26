@@ -4,11 +4,14 @@
 #include "ne_log.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
+#include "ne_renderer_pass.h"
 #include "ne_renderer_pipeline.h"
 #include "ne_renderer_shader.h"
 #include "ne_window.h"
 
 #include "test/ne_test.h"
+
+#include <math.h>
 
 /*
  * Cross-platform tiny yield used only in the "no renderer" fallback loop.
@@ -57,6 +60,39 @@ static const Vertex k_triangle_vertices[] = {
     {{-0.5f, -0.5f}, {0.0f, 1.0f, 0.0f, 1.0f}},  /* left   — green */
     {{ 0.5f, -0.5f}, {0.0f, 0.0f, 1.0f, 1.0f}},  /* right  — blue  */
 };
+
+/* ── Dynamic-buffer demo state ──────────────────────────────────────────── */
+/*
+ * Proves per-frame dynamic buffering: every frame we rotate the base triangle
+ * and write the result into the dynamic vertex buffer via
+ * ne_render_pass_update_buffer. The triangle spins smoothly with no flicker or
+ * tearing — which only holds if each frame writes its own buffer copy while the
+ * GPU still reads the previous frame's copy.
+ */
+typedef struct DemoState {
+    float angle; /* radians, advanced each frame */
+} DemoState;
+
+static void on_frame_update(NEFrameContext *ctx, NERenderPass *pass) {
+    DemoState *state = (DemoState *)ctx->user;
+    state->angle += 0.02f;
+
+    const float c = cosf(state->angle);
+    const float s = sinf(state->angle);
+
+    Vertex rotated[3];
+    for (int i = 0; i < 3; i++) {
+        const float x = k_triangle_vertices[i].position[0];
+        const float y = k_triangle_vertices[i].position[1];
+        rotated[i].position[0] = x * c - y * s;
+        rotated[i].position[1] = x * s + y * c;
+        for (int k = 0; k < 4; k++) {
+            rotated[i].color[k] = k_triangle_vertices[i].color[k];
+        }
+    }
+
+    ne_render_pass_update_buffer(pass, ctx->vertex_buffer, rotated, sizeof(rotated), 0);
+}
 
 /* ── Main ───────────────────────────────────────────────────────────────── */
 
@@ -179,6 +215,7 @@ int main(void) {
         .size = sizeof(k_triangle_vertices),
         .usage = NE_BUFFER_USAGE_VERTEX,
         .initial_data = k_triangle_vertices,
+        .dynamic = true, /* updated every frame to spin the triangle */
     });
 
     if (!ne_buffer_handle_valid(vbo)) {
@@ -226,12 +263,15 @@ int main(void) {
     /* Single source of truth for what a frame draws. Registering it as the
      * window render dispatch lets the platform layer redraw during a live
      * resize (when the OS event loop blocks this main loop). */
+    DemoState demo_state = { .angle = 0.0f };
     NEFrameContext frame_ctx = {
         .renderer = renderer,
         .surface = surface,
         .pipeline = pipeline,
         .vertex_buffer = vbo,
         .vertex_count = 3,
+        .on_update = on_frame_update,
+        .user = &demo_state,
     };
     ne_set_window_render_dispatch(window, ne_render_frame, &frame_ctx);
 

@@ -3,11 +3,21 @@
 
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
+#include "ne_renderer_pass.h"
 #include "ne_renderer_pipeline.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+struct NEFrameContext;
+
+/**
+ * Optional per-frame update hook, invoked after the frame begins but before the
+ * draw, with the active render pass. Use it to update dynamic buffers for this
+ * frame (e.g. via `ne_render_pass_update_buffer`).
+ */
+typedef void (*NEFrameUpdateFn)(struct NEFrameContext *ctx, NERenderPass *pass);
 
 /**
  * Everything needed to draw and present one frame.
@@ -22,6 +32,11 @@ typedef struct NEFrameContext {
     NEPipelineHandle pipeline;
     NEBufferHandle vertex_buffer;
     uint32_t vertex_count;
+
+    /** Optional per-frame update callback (may be NULL). */
+    NEFrameUpdateFn on_update;
+    /** Opaque user pointer passed through to `on_update` via the context. */
+    void *user;
 } NEFrameContext;
 
 /**

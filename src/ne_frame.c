@@ -14,6 +14,12 @@ void ne_render_frame(void *user) {
         return;
     }
 
+    /* Per-frame updates (e.g. dynamic buffer writes) happen here, against the
+     * active pass, before any draw consumes the data. */
+    if (ctx->on_update) {
+        ctx->on_update(ctx, pass);
+    }
+
     ne_render_pass_set_pipeline(pass, ctx->pipeline);
     ne_render_pass_set_vertex_buffer(pass, 0, ctx->vertex_buffer);
     ne_render_pass_draw(pass, 0, ctx->vertex_count);
