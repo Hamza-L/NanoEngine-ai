@@ -875,9 +875,15 @@ static VkSurfaceFormatKHR ne_vk_choose_surface_format(const VkSurfaceFormatKHR *
 }
 
 static VkPresentModeKHR ne_vk_choose_present_mode(const VkPresentModeKHR *modes, uint32_t count, bool vsync) {
-    /* FIFO is guaranteed. */
-    VkPresentModeKHR chosen = VK_PRESENT_MODE_MAILBOX_KHR;
-
+    /*
+     * FIFO is the only present mode the spec guarantees is supported, and it is
+     * vsync-paced (presents are released on vblank). It is therefore both the
+     * vsync choice and the universal fallback.
+     *
+     * When vsync is disabled we prefer MAILBOX (low-latency, no tearing) then
+     * IMMEDIATE (uncapped, may tear) — but only if the driver actually offers
+     * them; otherwise we fall back to FIFO.
+     */
     if (!vsync) {
         for (uint32_t i = 0; i < count; i++) {
             if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
@@ -891,7 +897,7 @@ static VkPresentModeKHR ne_vk_choose_present_mode(const VkPresentModeKHR *modes,
         }
     }
 
-    return chosen;
+    return VK_PRESENT_MODE_FIFO_KHR;
 }
 
 static uint32_t ne_vk_clamp_u32(uint32_t v, uint32_t minv, uint32_t maxv) {
