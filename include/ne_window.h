@@ -477,9 +477,11 @@ void ne_window_invalidate(const NEWindow *window);
 void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void));
 
 /**
- * Register a callback the platform layer invokes to redraw the window outside
- * the normal frame loop — e.g. during a live resize, when the OS event loop
- * blocks the main loop.
+ * Register the callback the platform's frame driver invokes to render a frame.
+ *
+ * On macOS this is called by a display link every refresh (including during a
+ * live resize, when the OS event loop blocks the main loop). On platforms that
+ * render from the main loop, it may go unused.
  *
  * `render` is called as `render(user)`; `user` is passed back verbatim and is
  * not retained or interpreted by the window. Pass NULL `render` to clear.
