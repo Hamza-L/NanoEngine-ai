@@ -1,5 +1,6 @@
 #import <AppKit/AppKit.h>
 #import <Foundation/Foundation.h>
+#import <QuartzCore/CADisplayLink.h>
 #import <Carbon/Carbon.h> /*for kVK_* key code constants */
 
 #include "ne_app.h"
@@ -279,6 +280,18 @@ static void ne_emit_mouse_button(NEWindow *window, NSEvent *event, bool is_down,
 
 @interface NEMacWindowDelegate : NSObject <NSWindowDelegate>
 @property(nonatomic, assign) NEWindow *owner;
+
+/*
+ * Primary frame driver (push model). Created at window creation and registered
+ * in NSRunLoopCommonModes so it fires at the display refresh in every run-loop
+ * mode — including AppKit's modal event-tracking loop during a window resize,
+ * which would otherwise block the app's main loop. The app's main loop only
+ * pumps events (it does not render); this display link drives every frame.
+ * CADisplayLink is main-run-loop driven (single-threaded, no marshalling).
+ * Invalidated in ne_window_destroy.
+ */
+@property(nonatomic, strong) CADisplayLink *displayLink API_AVAILABLE(macos(14.0));
+- (void)onDisplayLink:(CADisplayLink *)sender;
 @end
 
 @interface NEMacView : NSView
@@ -314,9 +327,13 @@ static void ne_emit_mouse_button(NEWindow *window, NSEvent *event, bool is_down,
         self.owner->callbacks.on_resize(self.owner, (int32_t)content.size.width, (int32_t)content.size.height,
                                         self.owner->user_data);
     }
+    /* No redraw here: the display link drives frames in all run-loop modes,
+     * including the modal resize loop, so resizing animates on its own. */
+}
 
-    /* Redraw during the live resize, which otherwise blocks the main loop. */
-    if (self.owner->render_frame) {
+- (void)onDisplayLink:(CADisplayLink *)sender {
+    (void)sender;
+    if (self.owner && self.owner->render_frame) {
         self.owner->render_frame(self.owner->render_frame_user);
     }
 }
@@ -508,16 +525,25 @@ bool ne_app_poll_events(NEApp *app) {
         return false;
     }
 
+    /*
+     * Push model: the CADisplayLink drives rendering, so this loop only pumps
+     * events and must not busy-spin. We BLOCK on the first event (distantFuture)
+     * rather than draining non-blocking; while blocked, the run loop still fires
+     * the display link, so frames render at the display refresh and the CPU
+     * sleeps between input. Once woken, we drain any remaining queued events
+     * non-blocking (distantPast) and return.
+     */
     @autoreleasepool {
-        while (true) {
-            NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
-                                                untilDate:[NSDate dateWithTimeIntervalSinceNow:0.0]
-                                                   inMode:NSDefaultRunLoopMode
-                                                  dequeue:YES];
-            if (!event) {
-                break;
-            }
+        NSEvent *event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                            untilDate:[NSDate distantFuture]
+                                               inMode:NSDefaultRunLoopMode
+                                              dequeue:YES];
+        while (event) {
             [NSApp sendEvent:event];
+            event = [NSApp nextEventMatchingMask:NSEventMaskAny
+                                       untilDate:[NSDate distantPast]
+                                          inMode:NSDefaultRunLoopMode
+                                         dequeue:YES];
         }
         [NSApp updateWindows];
     }
@@ -595,6 +621,20 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     [ns_window setAcceptsMouseMovedEvents:YES];
     [ns_window makeFirstResponder:view];
 
+    /*
+     * Primary frame driver (push model): a CADisplayLink registered in
+     * NSRunLoopCommonModes fires at the display refresh in every run-loop mode,
+     * including AppKit's modal resize loop. The app's main loop only pumps
+     * events; this link drives every frame. Registering in common modes (rather
+     * than a single mode) is what keeps frames flowing during a window resize,
+     * which a manual nextEventMatchingMask: loop cannot do on its own.
+     */
+    if (@available(macOS 14.0, *)) {
+        CADisplayLink *link = [view displayLinkWithTarget:delegate selector:@selector(onDisplayLink:)];
+        [link addToRunLoop:[NSRunLoop currentRunLoop] forMode:NSRunLoopCommonModes];
+        delegate.displayLink = link;
+    }
+
     window->ns_window = (__bridge_retained void *)ns_window;
     window->content_view = (__bridge_retained void *)view;
     window->delegate = (__bridge_retained void *)delegate;
@@ -627,6 +667,14 @@ void ne_window_destroy(NEWindow *window) {
 
     if (delegate) {
         delegate.owner = NULL;
+        /* Stop the frame-driving display link; it strongly retains the delegate,
+         * so invalidating it also breaks that reference. */
+        if (@available(macOS 14.0, *)) {
+            if (delegate.displayLink) {
+                [delegate.displayLink invalidate];
+                delegate.displayLink = nil;
+            }
+        }
     }
     if (view) {
         view.owner = NULL;

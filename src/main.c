@@ -260,9 +260,8 @@ int main(void) {
     NE_LOG_INFO("triangle demo initialized — press Escape to quit");
 
     /* ── Frame context ─────────────────────────────────────────────────── */
-    /* Single source of truth for what a frame draws. Registering it as the
-     * window render dispatch lets the platform layer redraw during a live
-     * resize (when the OS event loop blocks this main loop). */
+    /* Single source of truth for what a frame draws. It is registered as the
+     * window's render dispatch so the platform's frame driver can invoke it. */
     DemoState demo_state = { .angle = 0.0f };
     NEFrameContext frame_ctx = {
         .renderer = renderer,
@@ -276,10 +275,22 @@ int main(void) {
     ne_set_window_render_dispatch(window, ne_render_frame, &frame_ctx);
 
     /* ── Main loop ─────────────────────────────────────────────────────── */
-
+    /*
+     * Frame-driving model differs by platform:
+     *  - macOS (push): a CADisplayLink drives ne_render_frame at the display
+     *    refresh (including during a window resize). The main loop only pumps
+     *    events and blocks between them, so it must NOT render here.
+     *  - Win32 (pull): the app owns the loop and renders each iteration.
+     */
+#if defined(_WIN32)
     while (ne_window_is_open(window) && ne_app_poll_events(app)) {
         ne_render_frame(&frame_ctx);
     }
+#else
+    while (ne_window_is_open(window) && ne_app_poll_events(app)) {
+        /* Rendering is driven by the platform frame driver (display link). */
+    }
+#endif
 
     /* Avoid a dangling dispatch pointer into stack memory after the loop. */
     ne_set_window_render_dispatch(window, NULL, NULL);
