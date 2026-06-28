@@ -34,7 +34,6 @@
 #include "ne_alloc.h"
 
 #include <emscripten.h>
-#include <emscripten/html5_webgpu.h>
 #include <webgpu/webgpu.h>
 
 #include <stdlib.h>
@@ -43,6 +42,27 @@
 enum {
     NE_WGPU_MAX_FRAMES_IN_FLIGHT = 3,
 };
+
+/* strdup is POSIX, not exposed under -std=c23 -Wpedantic; provide a local one. */
+static char *ne_strdup(const char *s) {
+    if (!s) {
+        return NULL;
+    }
+    size_t n = strlen(s) + 1;
+    char *copy = (char *)malloc(n);
+    if (copy) {
+        memcpy(copy, s, n);
+    }
+    return copy;
+}
+
+/* Build a Dawn WGPUStringView from a null-terminated C string. */
+static WGPUStringView ne_sv(const char *s) {
+    WGPUStringView v;
+    v.data = s;
+    v.length = s ? strlen(s) : 0;
+    return v;
+}
 
 /* ── Resource pool slot types ───────────────────────────────────────────── */
 
@@ -153,17 +173,17 @@ static NERenderPass g_active_pass = {0};
 /* ── Async device acquisition ───────────────────────────────────────────── */
 
 /*
- * API-version landmine: the callback ABI changed across emsdk versions. This
- * uses the legacy form `(status, object, const char *message, void *userdata)`.
- * Newer headers pass callbacks via WGPURequestAdapterCallbackInfo /
- * WGPURequestDeviceCallbackInfo structs and deliver messages as WGPUStringView
- * (ptr+len). Adjust these signatures and the request calls to the pinned emsdk.
+ * Dawn / emdawnwebgpu callback ABI: callbacks are delivered through
+ * WGPURequest*CallbackInfo structs, messages arrive as WGPUStringView (ptr+len),
+ * and there are two userdata pointers. Status success is *_Success.
  */
 static void ne_wgpu_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
-                              const char *message, void *userdata) {
-    NERenderer *renderer = (NERenderer *)userdata;
+                              WGPUStringView message, void *userdata1, void *userdata2) {
+    (void)userdata2;
+    NERenderer *renderer = (NERenderer *)userdata1;
     if (status != WGPURequestDeviceStatus_Success || !device) {
-        NE_LOG_ERROR("WebGPU device request failed: %s", message ? message : "unknown error");
+        NE_LOG_ERROR("WebGPU device request failed: %.*s",
+                     (int)message.length, message.data ? message.data : "");
         renderer->device_failed = true;
         return;
     }
@@ -174,10 +194,12 @@ static void ne_wgpu_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
 }
 
 static void ne_wgpu_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter,
-                               const char *message, void *userdata) {
-    NERenderer *renderer = (NERenderer *)userdata;
+                               WGPUStringView message, void *userdata1, void *userdata2) {
+    (void)userdata2;
+    NERenderer *renderer = (NERenderer *)userdata1;
     if (status != WGPURequestAdapterStatus_Success || !adapter) {
-        NE_LOG_ERROR("WebGPU adapter request failed: %s", message ? message : "unknown error");
+        NE_LOG_ERROR("WebGPU adapter request failed: %.*s",
+                     (int)message.length, message.data ? message.data : "");
         renderer->device_failed = true;
         return;
     }
@@ -185,7 +207,13 @@ static void ne_wgpu_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adap
 
     WGPUDeviceDescriptor device_desc;
     memset(&device_desc, 0, sizeof(device_desc));
-    wgpuAdapterRequestDevice(adapter, &device_desc, ne_wgpu_on_device, renderer);
+
+    WGPURequestDeviceCallbackInfo cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.mode = WGPUCallbackMode_AllowSpontaneous;
+    cb.callback = ne_wgpu_on_device;
+    cb.userdata1 = renderer;
+    wgpuAdapterRequestDevice(adapter, &device_desc, cb);
 }
 
 NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
@@ -213,7 +241,13 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
      */
     WGPURequestAdapterOptions adapter_opts;
     memset(&adapter_opts, 0, sizeof(adapter_opts));
-    wgpuInstanceRequestAdapter(renderer->instance, &adapter_opts, ne_wgpu_on_adapter, renderer);
+
+    WGPURequestAdapterCallbackInfo cb;
+    memset(&cb, 0, sizeof(cb));
+    cb.mode = WGPUCallbackMode_AllowSpontaneous;
+    cb.callback = ne_wgpu_on_adapter;
+    cb.userdata1 = renderer;
+    wgpuInstanceRequestAdapter(renderer->instance, &adapter_opts, cb);
 
     return renderer;
 }
@@ -308,18 +342,14 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *renderer, NEWindow *wind
      */
     const char *selector = "#canvas";
 
-    /*
-     * API-version landmine: some emsdk/Dawn versions renamed this to
-     * WGPUSurfaceSourceCanvasHTMLSelector_Emscripten with a matching SType.
-     */
-    WGPUSurfaceDescriptorFromCanvasHTMLSelector canvas_desc;
+    WGPUEmscriptenSurfaceSourceCanvasHTMLSelector canvas_desc;
     memset(&canvas_desc, 0, sizeof(canvas_desc));
-    canvas_desc.chain.sType = WGPUSType_SurfaceDescriptorFromCanvasHTMLSelector;
-    canvas_desc.selector = selector;
+    canvas_desc.chain.sType = WGPUSType_EmscriptenSurfaceSourceCanvasHTMLSelector;
+    canvas_desc.selector = ne_sv(selector);
 
     WGPUSurfaceDescriptor surface_desc;
     memset(&surface_desc, 0, sizeof(surface_desc));
-    surface_desc.nextInChain = (const WGPUChainedStruct *)&canvas_desc;
+    surface_desc.nextInChain = (WGPUChainedStruct *)&canvas_desc;
 
     WGPUSurface wgpu_surface = wgpuInstanceCreateSurface(renderer->instance, &surface_desc);
     if (!wgpu_surface) {
@@ -336,7 +366,7 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *renderer, NEWindow *wind
     surface->renderer = renderer;
     surface->window = window;
     surface->surface = wgpu_surface;
-    surface->canvas_selector = strdup(selector);
+    surface->canvas_selector = ne_strdup(selector);
 
     /* Default clear color (matches the Metal backend). */
     surface->clear_color[0] = 0.1f;
@@ -416,15 +446,18 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
         return NULL;
     }
 
-    /* Choose the surface format once, now that adapter + surface both exist. */
+    /* Choose the surface format once, now that adapter + surface both exist.
+     * Dawn exposes the preferred format as capabilities.formats[0]. */
     if (renderer->surface_format == WGPUTextureFormat_Undefined) {
-        /*
-         * API-version landmine: newer ABI removed wgpuSurfaceGetPreferredFormat
-         * in favour of wgpuSurfaceGetCapabilities(...).formats[0]. Keep the
-         * BGRA8Unorm fallback regardless.
-         */
-        WGPUTextureFormat fmt = wgpuSurfaceGetPreferredFormat(surface->surface, renderer->adapter);
-        renderer->surface_format = (fmt == WGPUTextureFormat_Undefined) ? WGPUTextureFormat_BGRA8Unorm : fmt;
+        WGPUSurfaceCapabilities caps;
+        memset(&caps, 0, sizeof(caps));
+        WGPUTextureFormat fmt = WGPUTextureFormat_BGRA8Unorm;
+        if (wgpuSurfaceGetCapabilities(surface->surface, renderer->adapter, &caps) == WGPUStatus_Success &&
+            caps.formatCount > 0 && caps.formats) {
+            fmt = caps.formats[0];
+        }
+        wgpuSurfaceCapabilitiesFreeMembers(caps);
+        renderer->surface_format = fmt;
     }
 
     /* (Re)configure the surface when the framebuffer size changes. */
@@ -448,7 +481,9 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
     WGPUSurfaceTexture surface_texture;
     memset(&surface_texture, 0, sizeof(surface_texture));
     wgpuSurfaceGetCurrentTexture(surface->surface, &surface_texture);
-    if (surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_Success || !surface_texture.texture) {
+    if ((surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessOptimal &&
+         surface_texture.status != WGPUSurfaceGetCurrentTextureStatus_SuccessSuboptimal) ||
+        !surface_texture.texture) {
         return NULL; /* not presentable this frame (resize/occlusion) — skip */
     }
     surface->texture = surface_texture.texture;
@@ -565,9 +600,9 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
 
 /* ── Buffers ────────────────────────────────────────────────────────────── */
 
-static WGPUBufferUsageFlags ne_buffer_usage_to_wgpu(uint32_t usage) {
+static WGPUBufferUsage ne_buffer_usage_to_wgpu(uint32_t usage) {
     /* All buffers can receive writes (wgpuQueueWriteBuffer / mappedAtCreation). */
-    WGPUBufferUsageFlags flags = WGPUBufferUsage_CopyDst;
+    WGPUBufferUsage flags = WGPUBufferUsage_CopyDst;
     if (usage & NE_BUFFER_USAGE_VERTEX) {
         flags |= WGPUBufferUsage_Vertex;
     }
@@ -609,7 +644,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     slot->usage = desc->usage;
     slot->size = desc->size;
 
-    const WGPUBufferUsageFlags wgpu_usage = ne_buffer_usage_to_wgpu(desc->usage);
+    const WGPUBufferUsage wgpu_usage = ne_buffer_usage_to_wgpu(desc->usage);
     const uint32_t copy_count = ne_buffer_slot_copy_count(slot);
 
     for (uint32_t i = 0; i < copy_count; i++) {
@@ -744,19 +779,14 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
         return NE_SHADER_HANDLE_NULL;
     }
 
-    /*
-     * API-version landmine: newer ABI uses WGPUShaderSourceWGSL with a
-     * WGPUStringView .code (ptr+len) instead of WGPUShaderModuleWGSLDescriptor
-     * with a null-terminated .code. Adjust to the pinned emsdk.
-     */
-    WGPUShaderModuleWGSLDescriptor wgsl_desc;
+    WGPUShaderSourceWGSL wgsl_desc;
     memset(&wgsl_desc, 0, sizeof(wgsl_desc));
-    wgsl_desc.chain.sType = WGPUSType_ShaderModuleWGSLDescriptor;
-    wgsl_desc.code = desc->source;
+    wgsl_desc.chain.sType = WGPUSType_ShaderSourceWGSL;
+    wgsl_desc.code = ne_sv(desc->source);
 
     WGPUShaderModuleDescriptor module_desc;
     memset(&module_desc, 0, sizeof(module_desc));
-    module_desc.nextInChain = (const WGPUChainedStruct *)&wgsl_desc;
+    module_desc.nextInChain = (WGPUChainedStruct *)&wgsl_desc;
 
     WGPUShaderModule module = wgpuDeviceCreateShaderModule(renderer->device, &module_desc);
     if (!module) {
@@ -777,7 +807,7 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     slot->occupied = true;
     slot->stage = desc->stage;
     slot->module = module;
-    slot->entry_point = strdup(desc->entry_point);
+    slot->entry_point = ne_strdup(desc->entry_point);
 
     return (NEShaderHandle){.id = index + 1};
 }
@@ -933,14 +963,14 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
     WGPUFragmentState fragment_state;
     memset(&fragment_state, 0, sizeof(fragment_state));
     fragment_state.module = fs->module;
-    fragment_state.entryPoint = fs->entry_point;
+    fragment_state.entryPoint = ne_sv(fs->entry_point);
     fragment_state.targetCount = 1;
     fragment_state.targets = &color_target;
 
     WGPURenderPipelineDescriptor pd;
     memset(&pd, 0, sizeof(pd));
     pd.vertex.module = vs->module;
-    pd.vertex.entryPoint = vs->entry_point;
+    pd.vertex.entryPoint = ne_sv(vs->entry_point);
     pd.vertex.bufferCount = layout_count;
     pd.vertex.buffers = layout_count > 0 ? vb_layouts : NULL;
     pd.primitive.topology = ne_topology_to_wgpu(desc->topology);
