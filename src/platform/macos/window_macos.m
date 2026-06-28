@@ -9,12 +9,15 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 struct NEApp {
     bool initialized;
     bool running;
     uint32_t window_count;
+
+    /* Intrusive list of live windows (head-inserted in ne_window_create,
+     * unlinked in ne_window_destroy). Same idiom as NERenderer::surfaces. */
+    NEWindow *windows;
 };
 
 static struct {
@@ -35,6 +38,8 @@ struct NEWindow {
 
     void (*render_frame)(void *user);
     void *render_frame_user;
+
+    NEWindow *next; /* link in NEApp::windows registry */
 
     uint32_t mouse_buttons_down_mask;
 
@@ -555,9 +560,14 @@ bool ne_app_poll_events(NEApp *app) {
 }
 
 void ne_app_run(NEApp *app) {
-    const struct timespec sleep_time = {.tv_sec = 0, .tv_nsec = 1000000};
+    /*
+     * Push model: the per-view CADisplayLink (registered in NSRunLoopCommonModes)
+     * renders every window at the display refresh — including during a modal
+     * resize — firing from within ne_app_poll_events' blocking
+     * nextEventMatchingMask: spin. This loop only pumps events; it must not
+     * render here, and needs no sleep (the blocking poll idles the CPU).
+     */
     while (ne_app_poll_events(app)) {
-        nanosleep(&sleep_time, NULL);
     }
 }
 
@@ -641,6 +651,9 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     window->open = true;
     window->destroying = false;
 
+    /* Register in the app's window list (head-insert). */
+    window->next = app->windows;
+    app->windows = window;
     app->window_count++;
 
     if (desc->show_on_create) {
@@ -656,6 +669,19 @@ void ne_window_destroy(NEWindow *window) {
     }
 
     window->destroying = true;
+
+    /* Unlink from the app's window registry before any teardown. */
+    if (window->app) {
+        NEWindow **pp = &window->app->windows;
+        while (*pp) {
+            if (*pp == window) {
+                *pp = window->next;
+                break;
+            }
+            pp = &(*pp)->next;
+        }
+        window->next = NULL;
+    }
 
     /* Do not emit user callbacks during teardown. */
     memset(&window->callbacks, 0, sizeof(window->callbacks));

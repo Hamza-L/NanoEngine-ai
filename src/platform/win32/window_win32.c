@@ -21,6 +21,10 @@ struct NEApp {
 
     bool initialized;
     bool running;
+
+    /* Intrusive list of live windows (head-inserted in ne_window_create,
+     * unlinked in ne_window_destroy). ne_app_run walks it to render each. */
+    NEWindow *windows;
 };
 
 static struct {
@@ -58,6 +62,8 @@ struct NEWindow {
 
     void (*renderFrame)(void *user);
     void *renderFrameUser;
+
+    NEWindow *next; /* link in NEApp::windows registry */
 };
 
 static wchar_t *ne_utf8_to_wide(const char *utf8) {
@@ -535,14 +541,26 @@ bool ne_app_poll_events(NEApp *app) {
 }
 
 void ne_app_run(NEApp *app) {
+    if (!app) {
+        return;
+    }
+
     /*
-     * This is a convenience loop only.
-     * `ne_app_poll_events` is intentionally non-blocking (so a game loop can
-     * call it once per frame). Without a small sleep here, `ne_app_run` would
-     * busy-spin at 100% CPU when there are no messages.
+     * Pull model: the app owns the loop. Each iteration pumps OS messages, then
+     * renders every open window via its registered dispatch. Frame pacing comes
+     * from vsync-blocking present inside the render callback (Vulkan FIFO), so
+     * no sleep is needed.
+     *
+     * NOTE: if a window is minimized/occluded so its present path doesn't block,
+     * this loop can busy-spin. Acceptable for the always-visible demo; a future
+     * occlusion-aware refinement could sleep when no window presented a frame.
      */
     while (ne_app_poll_events(app)) {
-        Sleep(1);
+        for (NEWindow *w = app->windows; w; w = w->next) {
+            if (w->open && w->renderFrame) {
+                w->renderFrame(w->renderFrameUser);
+            }
+        }
     }
 }
 
@@ -628,6 +646,9 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
         ne_window_show(window);
     }
 
+    /* Register in the app's window list (head-insert). */
+    window->next = app->windows;
+    app->windows = window;
     app->window_count++;
     return window;
 }
@@ -638,6 +659,19 @@ void ne_window_destroy(NEWindow *window) {
     }
 
     window->destroying = true;
+
+    /* Unlink from the app's window registry before any teardown. */
+    if (window->app) {
+        NEWindow **pp = &window->app->windows;
+        while (*pp) {
+            if (*pp == window) {
+                *pp = window->next;
+                break;
+            }
+            pp = &(*pp)->next;
+        }
+        window->next = NULL;
+    }
 
     /* Do not emit user callbacks during teardown. */
     memset(&window->callbacks, 0, sizeof(window->callbacks));

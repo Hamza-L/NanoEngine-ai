@@ -63,10 +63,17 @@ void ne_app_destroy(NEApp *app);
 bool ne_app_poll_events(NEApp *app);
 
 /**
- * Run a simple event loop until the application stops.
+ * Run the application's frame loop until it stops.
  *
- * This is a convenience wrapper around repeated calls to
- * `ne_app_poll_events(app)`.
+ * This is the primary, portable entry point: the engine owns the loop and
+ * drives each window's registered render dispatch (see
+ * `ne_set_window_render_dispatch`) at the platform-correct cadence — a display
+ * link on macOS (push), the loop itself on Win32 (pull). Application code is
+ * therefore identical on every platform.
+ *
+ * For full control, the loop can instead be driven manually via repeated
+ * `ne_app_poll_events(app)` calls (the caller is then responsible for invoking
+ * rendering).
  *
  * Parameters:
  * - `app`: Application instance.

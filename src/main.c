@@ -13,18 +13,6 @@
 
 #include <math.h>
 
-/*
- * Cross-platform tiny yield used only in the "no renderer" fallback loop.
- * On macOS this is a no-op to keep behavior identical to the existing demo.
- */
-#if defined(_WIN32)
-#define WIN32_LEAN_AND_MEAN
-#include <windows.h>
-#define NE_PLATFORM_YIELD_MS_1() Sleep(1)
-#else
-#define NE_PLATFORM_YIELD_MS_1() ((void)0)
-#endif
-
 /* ── Callbacks ──────────────────────────────────────────────────────────── */
 
 static void on_close(NEWindow *window, void *user_data) {
@@ -274,21 +262,12 @@ int main(void) {
 
     /* ── Main loop ─────────────────────────────────────────────────────── */
     /*
-     * Frame-driving model differs by platform:
-     *  - macOS (push): a CADisplayLink drives ne_render_frame at the display
-     *    refresh (including during a window resize). The main loop only pumps
-     *    events and blocks between them, so it must NOT render here.
-     *  - Win32 (pull): the app owns the loop and renders each iteration.
+     * The engine owns the frame loop. ne_app_run drives each window's render
+     * dispatch at the platform-correct cadence — a CADisplayLink on macOS
+     * (push), the pull loop on Win32 — so application code is identical on
+     * every platform.
      */
-#if defined(_WIN32)
-    while (ne_window_is_open(window) && ne_app_poll_events(app)) {
-        ne_render_frame(&frame_ctx);
-    }
-#else
-    while (ne_window_is_open(window) && ne_app_poll_events(app)) {
-        /* Rendering is driven by the platform frame driver (display link). */
-    }
-#endif
+    ne_app_run(app);
 
     /* Avoid a dangling dispatch pointer into stack memory after the loop. */
     ne_set_window_render_dispatch(window, NULL, NULL);
