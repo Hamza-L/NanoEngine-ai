@@ -94,6 +94,83 @@ static void on_frame_update(NEFrameContext *ctx, NERenderPass *pass) {
     ne_render_pass_update_buffer(pass, ctx->vertex_buffer, rotated, sizeof(rotated), 0);
 }
 
+
+NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
+    NEShaderHandle vertex_shader   = NE_SHADER_HANDLE_NULL;
+    NEShaderHandle fragment_shader = NE_SHADER_HANDLE_NULL;
+
+#if defined(_WIN32)
+
+    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage         = NE_SHADER_STAGE_VERTEX,
+        .filename      = "shaders/glsl/basic.vert",
+        .entry_point   = "main",
+    });
+
+    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage         = NE_SHADER_STAGE_FRAGMENT,
+        .filename      = "shaders/glsl/basic.frag",
+        .entry_point   = "main",
+    });
+
+#else /* macOS / Metal */
+
+    void *shader_source = ne_file_read("shaders/metal/basic.metal", NULL);
+    if (!shader_source) {
+        NE_LOG_ERROR("failed to load shader source: shaders/metal/basic.metal");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage       = NE_SHADER_STAGE_VERTEX,
+        .source      = shader_source,
+        .entry_point = "vertexMain",
+        .filename    = "basic.metal",
+    });
+
+    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage       = NE_SHADER_STAGE_FRAGMENT,
+        .source      = shader_source,
+        .entry_point = "fragmentMain",
+        .filename    = "basic.metal",
+    });
+
+    ne_file_free(shader_source);
+
+#endif /* _WIN32 */
+
+    if (!ne_shader_handle_valid(vertex_shader) || !ne_shader_handle_valid(fragment_shader)) {
+        NE_LOG_ERROR("failed to create shaders");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    /* ── Create graphics pipeline ──────────────────────────────────────── */
+
+    const NEVertexAttribute vertex_attrs[] = {
+        { .location = 0, .format = NE_VERTEX_FORMAT_FLOAT2, .offset = offsetof(Vertex, position) },
+        { .location = 1, .format = NE_VERTEX_FORMAT_FLOAT4, .offset = offsetof(Vertex, color) },
+    };
+
+    const NEVertexBufferLayout vertex_layout = {
+        .stride = sizeof(Vertex),
+        .attributes = vertex_attrs,
+        .attribute_count = 2,
+    };
+
+    NEPipelineHandle pipeline = ne_pipeline_create(renderer, &(NEPipelineDesc){
+        .vertex_shader = vertex_shader,
+        .fragment_shader = fragment_shader,
+        .vertex_layouts = &vertex_layout,
+        .vertex_layout_count = 1,
+        .topology = NE_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+    });
+
+    ne_shader_destroy(renderer, fragment_shader);
+    ne_shader_destroy(renderer, vertex_shader);
+
+    return pipeline;
+}
+
 /* ── Main ───────────────────────────────────────────────────────────────── */
 
 int main(void) {
@@ -142,9 +219,10 @@ int main(void) {
         return 1;
     }
 
-    NERenderSurface *surface = ne_renderer_create_surface(renderer,
-                                                          window,
-                                                          &(NERenderSurfaceDesc){.vsync = true, .clear_color_rgba = {0.1f, 0.1f, 0.12f, 1.0f}});
+    NERenderSurface *surface = ne_renderer_create_surface(renderer, window,
+                                                          &(NERenderSurfaceDesc){
+                                                          .vsync = true,
+                                                          .clear_color_rgba = {0.1f, 0.1f, 0.12f, 1.0f}});
     if (!surface) {
         NE_LOG_ERROR("failed to create render surface");
         ne_renderer_destroy(renderer);
@@ -153,55 +231,9 @@ int main(void) {
         return 1;
     }
 
-    NEShaderHandle vertex_shader   = NE_SHADER_HANDLE_NULL;
-    NEShaderHandle fragment_shader = NE_SHADER_HANDLE_NULL;
-
-#if defined(_WIN32)
-
-    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage         = NE_SHADER_STAGE_VERTEX,
-        .filename      = "shaders/glsl/basic.vert",
-        .entry_point   = "main",
-    });
-
-    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage         = NE_SHADER_STAGE_FRAGMENT,
-        .filename      = "shaders/glsl/basic.frag",
-        .entry_point   = "main",
-    });
-
-#else /* macOS / Metal */
-
-    void *shader_source = ne_file_read("shaders/metal/basic.metal", NULL);
-    if (!shader_source) {
-        NE_LOG_ERROR("failed to load shader source: shaders/metal/basic.metal");
-        ne_renderer_destroy_surface(renderer, surface);
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
-
-    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage       = NE_SHADER_STAGE_VERTEX,
-        .source      = shader_source,
-        .entry_point = "vertexMain",
-        .filename    = "basic.metal",
-    });
-
-    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
-        .stage       = NE_SHADER_STAGE_FRAGMENT,
-        .source      = shader_source,
-        .entry_point = "fragmentMain",
-        .filename    = "basic.metal",
-    });
-
-    ne_file_free(shader_source);
-
-#endif /* _WIN32 */
-
-    if (!ne_shader_handle_valid(vertex_shader) || !ne_shader_handle_valid(fragment_shader)) {
-        NE_LOG_ERROR("failed to create shaders");
+    NEPipelineHandle pipeline = create_basic_pipeline(renderer);
+    if (!ne_pipeline_handle_valid(pipeline)) {
+        NE_LOG_ERROR("failed to create render surface");
         ne_renderer_destroy_surface(renderer, surface);
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);
@@ -220,41 +252,6 @@ int main(void) {
 
     if (!ne_buffer_handle_valid(vbo)) {
         NE_LOG_ERROR("failed to create vertex buffer");
-        ne_renderer_destroy_surface(renderer, surface);
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
-
-    /* ── Create graphics pipeline ──────────────────────────────────────── */
-
-    const NEVertexAttribute vertex_attrs[] = {
-        { .location = 0, .format = NE_VERTEX_FORMAT_FLOAT2, .offset = offsetof(Vertex, position) },
-        { .location = 1, .format = NE_VERTEX_FORMAT_FLOAT4, .offset = offsetof(Vertex, color) },
-    };
-
-    const NEVertexBufferLayout vertex_layout = {
-        .stride = sizeof(Vertex),
-        .attributes = vertex_attrs,
-        .attribute_count = 2,
-    };
-
-    NEPipelineHandle pipeline = ne_pipeline_create(renderer, &(NEPipelineDesc){
-        .vertex_shader = vertex_shader,
-        .fragment_shader = fragment_shader,
-        .vertex_layouts = &vertex_layout,
-        .vertex_layout_count = 1,
-        .topology = NE_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-    });
-
-    if (!ne_pipeline_handle_valid(pipeline)) {
-        NE_LOG_ERROR("failed to create pipeline");
-        ne_renderer_destroy_surface(renderer, surface);
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
     }
 
     NE_LOG_INFO("triangle demo initialized — press Escape to quit");
@@ -272,6 +269,7 @@ int main(void) {
         .on_update = on_frame_update,
         .user = &demo_state,
     };
+
     ne_set_window_render_dispatch(window, ne_render_frame, &frame_ctx);
 
     /* ── Main loop ─────────────────────────────────────────────────────── */
@@ -299,8 +297,6 @@ int main(void) {
 
     ne_pipeline_destroy(renderer, pipeline);
     ne_buffer_destroy(renderer, vbo);
-    ne_shader_destroy(renderer, fragment_shader);
-    ne_shader_destroy(renderer, vertex_shader);
     ne_renderer_destroy_surface(renderer, surface);
     ne_renderer_destroy(renderer);
     ne_window_destroy(window);
