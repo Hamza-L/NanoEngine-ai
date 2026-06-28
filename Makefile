@@ -54,7 +54,11 @@ OBJ_EXT := o
 mkdir_p = mkdir -p "$(1)"
 rmdir_rf = rm -rf "$(1)"
 
-ifeq ($(OS),Windows_NT)
+# Web (Emscripten/WebGPU) is an explicit opt-in: `make PLATFORM=web`. A wasm
+# cross-compile can't be detected via $(OS)/uname, so it must be requested.
+ifeq ($(PLATFORM),web)
+include MakeFile_emscripten.mk
+else ifeq ($(OS),Windows_NT)
 include MakeFile_win32.mk
 else
 UNAME_S := $(shell uname -s)

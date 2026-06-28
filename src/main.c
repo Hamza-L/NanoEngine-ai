@@ -61,7 +61,31 @@ typedef struct DemoState {
     float angle; /* radians, advanced each frame */
 } DemoState;
 
+static NEPipelineHandle create_basic_pipeline(NERenderer *renderer);
+
 static void on_frame_update(NEFrameContext *ctx, NERenderPass *pass) {
+    /*
+     * On the web the GPU device is acquired asynchronously, so resources cannot
+     * be created in main() before the loop (the device isn't ready yet). Create
+     * them lazily on the first frame that runs (which only happens once the
+     * device is ready, and after begin_frame has chosen the surface format that
+     * pipeline creation needs). On native the resources were created eagerly, so
+     * the handles are already valid and this block is a no-op.
+     */
+    if (!ne_pipeline_handle_valid(ctx->pipeline)) {
+        ctx->pipeline = create_basic_pipeline(ctx->renderer);
+        ctx->vertex_buffer = ne_buffer_create(ctx->renderer, &(NEBufferDesc){
+            .size = sizeof(k_triangle_vertices),
+            .usage = NE_BUFFER_USAGE_VERTEX,
+            .initial_data = k_triangle_vertices,
+            .dynamic = true,
+        });
+        ctx->vertex_count = 3;
+    }
+    if (!ne_pipeline_handle_valid(ctx->pipeline) || !ne_buffer_handle_valid(ctx->vertex_buffer)) {
+        return; /* resources not ready / failed — skip this frame's update */
+    }
+
     DemoState *state = (DemoState *)ctx->user;
     state->angle += 0.02f;
 
@@ -83,7 +107,7 @@ static void on_frame_update(NEFrameContext *ctx, NERenderPass *pass) {
 }
 
 
-NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
+static NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
     NEShaderHandle vertex_shader   = NE_SHADER_HANDLE_NULL;
     NEShaderHandle fragment_shader = NE_SHADER_HANDLE_NULL;
 
@@ -100,6 +124,30 @@ NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
         .filename      = "shaders/glsl/basic.frag",
         .entry_point   = "main",
     });
+
+#elif defined(__EMSCRIPTEN__) /* Web / WebGPU (WGSL) */
+
+    void *shader_source = ne_file_read("shaders/wgsl/basic.wgsl", NULL);
+    if (!shader_source) {
+        NE_LOG_ERROR("failed to load shader source: shaders/wgsl/basic.wgsl");
+        return NE_PIPELINE_HANDLE_NULL;
+    }
+
+    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage       = NE_SHADER_STAGE_VERTEX,
+        .source      = shader_source,
+        .entry_point = "vs_main",
+        .filename    = "basic.wgsl",
+    });
+
+    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
+        .stage       = NE_SHADER_STAGE_FRAGMENT,
+        .source      = shader_source,
+        .entry_point = "fs_main",
+        .filename    = "basic.wgsl",
+    });
+
+    ne_file_free(shader_source);
 
 #else /* macOS / Metal */
 
@@ -219,9 +267,21 @@ int main(void) {
         return 1;
     }
 
-    NEPipelineHandle pipeline = create_basic_pipeline(renderer);
+    /*
+     * Resource creation timing differs by platform:
+     *  - Native (Metal/Vulkan): the device exists synchronously, so create the
+     *    pipeline and vertex buffer up front here.
+     *  - Web (WebGPU): the device is acquired asynchronously and is NOT ready at
+     *    this point, so resources are created lazily on the first frame (see
+     *    on_frame_update). Skip eager creation; the handles start null.
+     */
+    NEPipelineHandle pipeline = NE_PIPELINE_HANDLE_NULL;
+    NEBufferHandle vbo = NE_BUFFER_HANDLE_NULL;
+
+#ifndef __EMSCRIPTEN__
+    pipeline = create_basic_pipeline(renderer);
     if (!ne_pipeline_handle_valid(pipeline)) {
-        NE_LOG_ERROR("failed to create render surface");
+        NE_LOG_ERROR("failed to create pipeline");
         ne_renderer_destroy_surface(renderer, surface);
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);
@@ -229,26 +289,37 @@ int main(void) {
         return 1;
     }
 
-    /* ── Create vertex buffer ──────────────────────────────────────────── */
-
-    NEBufferHandle vbo = ne_buffer_create(renderer, &(NEBufferDesc){
+    vbo = ne_buffer_create(renderer, &(NEBufferDesc){
         .size = sizeof(k_triangle_vertices),
         .usage = NE_BUFFER_USAGE_VERTEX,
         .initial_data = k_triangle_vertices,
         .dynamic = true, /* updated every frame to spin the triangle */
     });
-
     if (!ne_buffer_handle_valid(vbo)) {
         NE_LOG_ERROR("failed to create vertex buffer");
     }
+#endif
 
     NE_LOG_INFO("triangle demo initialized — press Escape to quit");
 
     /* ── Frame context ─────────────────────────────────────────────────── */
-    /* Single source of truth for what a frame draws. It is registered as the
-     * window's render dispatch so the platform's frame driver can invoke it. */
+    /*
+     * Single source of truth for what a frame draws. Registered as the window's
+     * render dispatch so the platform's frame driver can invoke it.
+     *
+     * On the web, ne_app_run hands the loop to the browser and main() unwinds
+     * while the rAF callback keeps firing — so the context must NOT live on
+     * main()'s stack. It is static there. On native it is a plain local.
+     */
+#ifdef __EMSCRIPTEN__
+    static DemoState demo_state;
+    static NEFrameContext frame_ctx;
+    demo_state = (DemoState){ .angle = 0.0f };
+    frame_ctx = (NEFrameContext){
+#else
     DemoState demo_state = { .angle = 0.0f };
     NEFrameContext frame_ctx = {
+#endif
         .renderer = renderer,
         .surface = surface,
         .pipeline = pipeline,
@@ -264,8 +335,11 @@ int main(void) {
     /*
      * The engine owns the frame loop. ne_app_run drives each window's render
      * dispatch at the platform-correct cadence — a CADisplayLink on macOS
-     * (push), the pull loop on Win32 — so application code is identical on
-     * every platform.
+     * (push), the pull loop on Win32, requestAnimationFrame on the web — so
+     * application code is identical on every platform.
+     *
+     * Note: on the web this does not return (the browser owns the loop); the
+     * cleanup below runs only on native.
      */
     ne_app_run(app);
 
@@ -274,8 +348,8 @@ int main(void) {
 
     /* ── Cleanup ───────────────────────────────────────────────────────── */
 
-    ne_pipeline_destroy(renderer, pipeline);
-    ne_buffer_destroy(renderer, vbo);
+    ne_pipeline_destroy(renderer, frame_ctx.pipeline);
+    ne_buffer_destroy(renderer, frame_ctx.vertex_buffer);
     ne_renderer_destroy_surface(renderer, surface);
     ne_renderer_destroy(renderer);
     ne_window_destroy(window);
