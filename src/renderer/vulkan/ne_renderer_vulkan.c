@@ -1960,6 +1960,8 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         surface->wants_swapchain_recreate = true;
     }
 
+    ne_window_show(surface->window);
+
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
     pass->surface      = NULL;
