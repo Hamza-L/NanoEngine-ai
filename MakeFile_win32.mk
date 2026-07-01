@@ -1,5 +1,17 @@
 # --- Windows build settings ----------------------------------------------
 
+# Detect shell: if /bin/sh exists we're in MSYS2/Git Bash, otherwise cmd.exe.
+ifneq ($(wildcard /bin/sh),)
+SHELL := /bin/sh
+mkdir_p = mkdir -p "$(1)"
+rmdir_rf = rm -rf "$(1)"
+else
+SHELL := cmd.exe
+.SHELLFLAGS := /C
+mkdir_p = if not exist "$(subst /,\,$(patsubst %/,%,$(1)))" mkdir "$(subst /,\,$(patsubst %/,%,$(1)))"
+rmdir_rf = if exist "$(subst /,\,$(patsubst %/,%,$(1)))" rmdir /s /q "$(subst /,\,$(patsubst %/,%,$(1)))"
+endif
+
 OBJ_EXT := obj
 
 # --- Sources --------------------------------------------------------------
@@ -93,6 +105,6 @@ $(VULKAN_HEADERS_MARKER):
 	@$(call mkdir_p,$(BUILD_DIR)/deps)
 	@powershell -NoProfile -Command "$$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '$(VULKAN_HEADERS_URL)' -OutFile '$(VULKAN_HEADERS_ZIP)'"
 	@powershell -NoProfile -Command "Expand-Archive -Force '$(VULKAN_HEADERS_ZIP)' '$(BUILD_DIR)/deps'"
-	@rm -rf "$(VULKAN_HEADERS_DIR)"
+	@powershell -NoProfile -Command "if (Test-Path '$(VULKAN_HEADERS_DIR)') { Remove-Item -Recurse -Force '$(VULKAN_HEADERS_DIR)' }"
 	@$(call mkdir_p,external)
-	@mv "$(BUILD_DIR)/deps/Vulkan-Headers-$(VULKAN_HEADERS_VERSION)" "$(VULKAN_HEADERS_DIR)"
+	@powershell -NoProfile -Command "Move-Item -Force '$(BUILD_DIR)/deps/Vulkan-Headers-$(VULKAN_HEADERS_VERSION)' '$(VULKAN_HEADERS_DIR)'"

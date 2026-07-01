@@ -8,12 +8,15 @@ OBJC := clang
 APP_NAME := NanoEngine
 
 # Platform detection (works from cmd.exe, PowerShell, and MSYS2/Git Bash).
-UNAME_S := $(shell uname -s 2>/dev/null)
+# On native Windows, $(OS) is always Windows_NT — skip uname entirely.
 IS_WINDOWS :=
 ifeq ($(OS),Windows_NT)
 IS_WINDOWS := 1
-else ifneq ($(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),)
+else
+UNAME_S := $(shell uname -s)
+ifneq ($(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),)
 IS_WINDOWS := 1
+endif
 endif
 
 ifeq ($(IS_WINDOWS),1)
@@ -98,9 +101,18 @@ test: $(APP_NAME)
 $(APP_NAME): $(OUTPUT)
 
 # Real file target used for correct incremental linking.
+# TMP override prevents MSVC linker temp-file failures under MSYS2/Cygwin make.
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
+ifeq ($(IS_WINDOWS),1)
+ifneq ($(wildcard /bin/sh),)
 	@TMP="$(CURDIR)/build" TEMP="$(CURDIR)/build" $(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
+else
+	@$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
+endif
+else
+	@$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
+endif
 
 $(BUILD_DIR):
 	@$(call mkdir_p,$(BUILD_DIR))
