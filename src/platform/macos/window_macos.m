@@ -656,9 +656,7 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     app->windows = window;
     app->window_count++;
 
-    if (desc->show_on_create) {
-        [ns_window makeKeyAndOrderFront:nil];
-    }
+    [ns_window makeKeyAndOrderFront:nil];
 
     return window;
 }

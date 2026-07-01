@@ -67,9 +67,6 @@ typedef struct NEWindowDesc {
 
     /** Whether the window should have no titlebar or border (borderless). */
     bool undecorated;
-
-    /** Whether the window is shown immediately after creation. */
-    bool show_on_create;
 } NEWindowDesc;
 
 /**

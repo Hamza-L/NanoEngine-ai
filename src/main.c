@@ -113,32 +113,17 @@ static NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
 
 #if defined(_WIN32)
 
-    size_t vert_size = 0, frag_size = 0;
-    void *vert_spv = ne_file_read(NE_SPIRV_VERT_PATH, &vert_size);
-    void *frag_spv = ne_file_read(NE_SPIRV_FRAG_PATH, &frag_size);
-    if (!vert_spv || !frag_spv) {
-        NE_LOG_ERROR("failed to load pre-compiled SPIR-V shaders");
-        ne_file_free(vert_spv);
-        ne_file_free(frag_spv);
-        return NE_PIPELINE_HANDLE_NULL;
-    }
-
-    vertex_shader = ne_shader_create(renderer, &(NEShaderDesc){
+    vertex_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
         .stage         = NE_SHADER_STAGE_VERTEX,
-        .bytecode      = vert_spv,
-        .bytecode_size = vert_size,
+        .filename      = "shaders/glsl/basic.vert",
         .entry_point   = "main",
     });
 
-    fragment_shader = ne_shader_create(renderer, &(NEShaderDesc){
+    fragment_shader = ne_shader_create_from_source(renderer, &(NEShaderSourceDesc){
         .stage         = NE_SHADER_STAGE_FRAGMENT,
-        .bytecode      = frag_spv,
-        .bytecode_size = frag_size,
+        .filename      = "shaders/glsl/basic.frag",
         .entry_point   = "main",
     });
-
-    ne_file_free(vert_spv);
-    ne_file_free(frag_spv);
 
 #elif defined(__EMSCRIPTEN__) /* Web / WebGPU (WGSL) */
 
@@ -246,7 +231,7 @@ int main(void) {
                                                  .width = 800,
                                                  .height = 600,
                                                  .resizable = true,
-                                                 .show_on_create = true});
+                                                 .undecorated = false});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);

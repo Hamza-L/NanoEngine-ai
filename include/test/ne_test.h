@@ -24,8 +24,7 @@
                                                  .y = 100,
                                                  .width = 800,
                                                  .height = 600,
-                                                 .resizable = true,
-                                                 .show_on_create = true});
+                                                 .resizable = true});
     if (!window) {
         NE_LOG_ERROR("failed to create window");
         ne_app_destroy(app);

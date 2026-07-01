@@ -108,7 +108,6 @@ Creates and manages OS windows with input event callbacks.
 | `width`, `height` | `int32_t` | Initial content area size |
 | `resizable` | `bool` | Allow user resizing |
 | `undecorated` | `bool` | Borderless window (no title bar or controls) |
-| `show_on_create` | `bool` | Make visible immediately after creation |
 
 ### Functions
 

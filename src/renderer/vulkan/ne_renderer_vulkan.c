@@ -1778,8 +1778,6 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
-    ne_window_show(surface->window);
-
     const bool vsync = true; /* surface desc vsync is not stored yet; treat as true for now. */
 
     if (surface->wants_swapchain_recreate || surface->sc.swapchain == VK_NULL_HANDLE) {
@@ -1920,7 +1918,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
-    /* ── Submit and deferred present ──────────────────────────────────────────── */
+    /* ── Submit and present ──────────────────────────────────────────── */
 
     const uint32_t image_index = surface->sc.acquired_image_index;
     const uint32_t frame_index = surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
@@ -1945,7 +1943,6 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
-    /* Present immediately — no deferral through the message pump. */
     VkPresentInfoKHR pi;
     memset(&pi, 0, sizeof(pi));
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;

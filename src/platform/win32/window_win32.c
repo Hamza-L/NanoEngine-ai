@@ -615,7 +615,7 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     wchar_t *title_w = ne_utf8_to_wide(desc->title ? desc->title : "NanoEngine");
 
-    const HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, L"NanoEngineWindow", title_w ? title_w : L"NanoEngine", style, (int)desc->x, (int)desc->y,
+    const HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP, L"NanoEngineWindow", title_w ? title_w : L"NanoEngine", style, (int)desc->x, (int)desc->y,
                                       win_w, win_h, NULL, NULL, app->hinstance, window);
 
     if (title_w) {free(title_w);}
@@ -639,9 +639,7 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     window->hwnd = hwnd;
 
-    if (desc->show_on_create) {
-        ne_window_show(window);
-    }
+    ne_window_show(window);
 
     /* Register in the app's window list (head-insert). */
     window->next = app->windows;
