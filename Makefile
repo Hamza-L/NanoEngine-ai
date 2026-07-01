@@ -7,8 +7,16 @@ OBJC := clang
 # Public target name (what users type): no extension, consistent across platforms.
 APP_NAME := NanoEngine
 
-# Actual output file name differs on Windows.
+# Platform detection (works from cmd.exe, PowerShell, and MSYS2/Git Bash).
+UNAME_S := $(shell uname -s 2>/dev/null)
+IS_WINDOWS :=
 ifeq ($(OS),Windows_NT)
+IS_WINDOWS := 1
+else ifneq ($(filter MINGW% MSYS% CYGWIN%,$(UNAME_S)),)
+IS_WINDOWS := 1
+endif
+
+ifeq ($(IS_WINDOWS),1)
 EXE_EXT := .exe
 else
 EXE_EXT :=
@@ -54,19 +62,15 @@ OBJ_EXT := o
 mkdir_p = mkdir -p "$(1)"
 rmdir_rf = rm -rf "$(1)"
 
-# Web (Emscripten/WebGPU) is an explicit opt-in: `make PLATFORM=web`. A wasm
-# cross-compile can't be detected via $(OS)/uname, so it must be requested.
+# Web (Emscripten/WebGPU) is an explicit opt-in: `make PLATFORM=web`.
 ifeq ($(PLATFORM),web)
 include MakeFile_emscripten.mk
-else ifeq ($(OS),Windows_NT)
+else ifeq ($(IS_WINDOWS),1)
 include MakeFile_win32.mk
-else
-UNAME_S := $(shell uname -s)
-ifeq ($(UNAME_S),Darwin)
+else ifeq ($(UNAME_S),Darwin)
 include MakeFile_macos.mk
 else
-$(error Unsupported platform for step 1. Add Linux target if needed)
-endif
+$(error Unsupported platform: $(UNAME_S))
 endif
 
 OBJ_C := $(SRC_C:%.c=$(BUILD_DIR)/%.$(OBJ_EXT))
@@ -78,7 +82,7 @@ DEPS := $(OBJS:.$(OBJ_EXT)=.d)
 # Automatically include generated dependency files (if present).
 -include $(DEPS)
 
-.PHONY: all clean test $(APP_NAME)
+.PHONY: all clean clean-full test $(APP_NAME)
 
 # Default build (same command on every platform):
 #   make
@@ -96,7 +100,7 @@ $(APP_NAME): $(OUTPUT)
 # Real file target used for correct incremental linking.
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
-	@$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
+	@TMP="$(CURDIR)/build" TEMP="$(CURDIR)/build" $(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
 
 $(BUILD_DIR):
 	@$(call mkdir_p,$(BUILD_DIR))
@@ -116,3 +120,6 @@ $(BUILD_DIR)/%.$(OBJ_EXT): %.m $(EXTRA_OBJECT_DEPS)
 
 clean:
 	@$(call rmdir_rf,build)
+
+clean-full: clean
+	@$(call rmdir_rf,external)
