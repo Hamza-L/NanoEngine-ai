@@ -58,8 +58,6 @@ struct NEWindow {
     /* UTF-16 surrogate tracking for WM_CHAR text input. */
     uint16_t pending_high_surrogate;
 
-    void (*presentFrame)(void);
-
     void (*renderFrame)(void *user);
     void *renderFrameUser;
 
@@ -271,7 +269,6 @@ static LRESULT CALLBACK ne_wndproc(HWND hwnd, UINT msg, WPARAM wparam, LPARAM lp
         }
 
     case WM_PAINT:
-        if(window->presentFrame) window->presentFrame();
         return DefWindowProcW(hwnd, msg, wparam, lparam);
 
     case WM_DESTROY:
@@ -848,7 +845,8 @@ void ne_window_invalidate(const NEWindow *window) {
 }
 
 void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void)) {
-    window->presentFrame = presentFrame;
+    (void)window;
+    (void)presentFrame;
 }
 
 void ne_set_window_render_dispatch(NEWindow *window, void(*render)(void *user), void *user) {

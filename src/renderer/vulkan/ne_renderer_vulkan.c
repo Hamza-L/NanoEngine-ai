@@ -272,12 +272,6 @@ typedef struct NESwapchain {
     uint32_t acquired_image_index;
 } NESwapchain;
 
-typedef struct NEQueuePresentCommand{
-    NERenderSurface *surface;
-    uint32_t image_index;
-    uint32_t frame_index;
-} NEQueuePresentCommand;
-
 struct NERenderer {
     HMODULE vulkan_lib;
     VkInstance instance;
@@ -299,8 +293,6 @@ struct NERenderer {
     VkDeviceMemory staging_memory;
     void *staging_mapped;
     uint32_t staging_size;
-
-    NEQueuePresentCommand queueDeferredPresentCommand;
 
     /* Transfer command pool for staging uploads */
     VkCommandPool transfer_cmd_pool;
@@ -362,8 +354,6 @@ struct NERenderSurface {
 };
 
 
-// forwward declaration for present callback
-void ne_vk_present();
 
 /**
  * NERenderPass is currently backed by the surface itself.
@@ -1728,8 +1718,6 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
     surface->next = r->surfaces;
     r->surfaces = surface;
 
-    ne_set_window_present_dispatch(window, ne_vk_present);
-
     return surface;
 }
 
@@ -1788,9 +1776,6 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     }
 
     ne_window_show(surface->window);
-
-    // necessary to trigger a surface re-draw
-    ne_window_invalidate(surface->window);
 
     const bool vsync = true; /* surface desc vsync is not stored yet; treat as true for now. */
 
@@ -1957,25 +1942,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         return;
     }
 
-    r->queueDeferredPresentCommand.frame_index = frame_index;
-    r->queueDeferredPresentCommand.image_index = image_index;
-    r->queueDeferredPresentCommand.surface = surface;
-
-    surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
-
-    pass->surface      = NULL;
-    pass->cmd          = VK_NULL_HANDLE;
-    pass->bound_layout = VK_NULL_HANDLE;
-}
-
-void ne_vk_present() {
-    NERenderer* r = g_renderer_singleton;
-    NERenderSurface* surface = g_renderer_singleton->queueDeferredPresentCommand.surface;
-    const uint32_t image_index = g_renderer_singleton->queueDeferredPresentCommand.image_index;
-
-    if(!r) return;
-    if(!surface) return;
-
+    /* Present immediately — no deferral through the message pump. */
     VkPresentInfoKHR pi;
     memset(&pi, 0, sizeof(pi));
     pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
@@ -1985,7 +1952,7 @@ void ne_vk_present() {
     pi.pSwapchains = &surface->sc.swapchain;
     pi.pImageIndices = &image_index;
 
-    VkResult vr = r->fns.vkQueuePresentKHR(r->queue, &pi);
+    vr = r->fns.vkQueuePresentKHR(r->queue, &pi);
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
         surface->wants_swapchain_recreate = true;
     } else if (vr != VK_SUCCESS) {
@@ -1993,8 +1960,13 @@ void ne_vk_present() {
         surface->wants_swapchain_recreate = true;
     }
 
-    memset(&g_renderer_singleton->queueDeferredPresentCommand, 0, sizeof(g_renderer_singleton->queueDeferredPresentCommand));
+    surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
+
+    pass->surface      = NULL;
+    pass->cmd          = VK_NULL_HANDLE;
+    pass->bound_layout = VK_NULL_HANDLE;
 }
+
 
 /* ========================================================================
  * GPU Buffer Management
