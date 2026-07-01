@@ -1466,14 +1466,44 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
+    /* Enumerate extensions and layers once, then check against the cached lists. */
+    uint32_t avail_ext_count = 0;
+    r->fns.vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
+    VkExtensionProperties *avail_exts = NULL;
+    if (avail_ext_count > 0) {
+        avail_exts = (VkExtensionProperties *)calloc(avail_ext_count, sizeof(VkExtensionProperties));
+        if (avail_exts) {
+            r->fns.vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
+        }
+    }
+
+    uint32_t avail_layer_count = 0;
+    r->fns.vkEnumerateInstanceLayerProperties(&avail_layer_count, NULL);
+    VkLayerProperties *avail_layers = NULL;
+    if (avail_layer_count > 0) {
+        avail_layers = (VkLayerProperties *)calloc(avail_layer_count, sizeof(VkLayerProperties));
+        if (avail_layers) {
+            r->fns.vkEnumerateInstanceLayerProperties(&avail_layer_count, avail_layers);
+        }
+    }
+
     /* Instance extensions required for Win32 surfaces. */
     const char *extensions[8];
     uint32_t ext_count = 0;
 
     const char *required_exts[] = {VK_KHR_SURFACE_EXTENSION_NAME, VK_KHR_WIN32_SURFACE_EXTENSION_NAME};
     for (uint32_t i = 0; i < (uint32_t)(sizeof(required_exts) / sizeof(required_exts[0])); i++) {
-        if (!ne_vk_has_extension(&r->fns, required_exts[i])) {
+        bool found = false;
+        for (uint32_t j = 0; j < avail_ext_count && avail_exts; j++) {
+            if (strcmp(avail_exts[j].extensionName, required_exts[i]) == 0) {
+                found = true;
+                break;
+            }
+        }
+        if (!found) {
             NE_LOG_ERROR("required Vulkan instance extension not available: %s", required_exts[i]);
+            free(avail_exts);
+            free(avail_layers);
             ne_renderer_destroy(r);
             return NULL;
         }
@@ -1486,17 +1516,30 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
 
     if (!desc || desc->enable_validation) {
         const char *val_layer = "VK_LAYER_KHRONOS_validation";
-        if (ne_vk_has_layer(&r->fns, val_layer)) {
+        bool has_val_layer = false;
+        for (uint32_t i = 0; i < avail_layer_count && avail_layers; i++) {
+            if (strcmp(avail_layers[i].layerName, val_layer) == 0) {
+                has_val_layer = true;
+                break;
+            }
+        }
+        if (has_val_layer) {
             layers[layer_count++] = val_layer;
 
             /* Debug utils is optional; we wire it up later. */
-            if (ne_vk_has_extension(&r->fns, VK_EXT_DEBUG_UTILS_EXTENSION_NAME)) {
-                extensions[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+            for (uint32_t i = 0; i < avail_ext_count && avail_exts; i++) {
+                if (strcmp(avail_exts[i].extensionName, VK_EXT_DEBUG_UTILS_EXTENSION_NAME) == 0) {
+                    extensions[ext_count++] = VK_EXT_DEBUG_UTILS_EXTENSION_NAME;
+                    break;
+                }
             }
         } else {
             NE_LOG_WARN("validation requested but VK_LAYER_KHRONOS_validation not available");
         }
     }
+
+    free(avail_exts);
+    free(avail_layers);
 
     VkApplicationInfo app_info;
     memset(&app_info, 0, sizeof(app_info));
