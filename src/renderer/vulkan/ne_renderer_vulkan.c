@@ -2432,14 +2432,14 @@ static void ne_cmd_copy_buffer_to_image(const NERenderer *renderer, const VkComm
     renderer->fns.vkCmdCopyBufferToImage(cmd, buffer, slot->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 }
 
-NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
+NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     if (!renderer || !desc || desc->width == 0 || desc->height == 0) {
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
     if (!desc->usage) {
         NE_LOG_ERROR("buffer creation requires at least one usage flag");
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
     /* Allocate a slot from the buffer pool */
@@ -2452,10 +2452,10 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("failed to allocate buffer slot from pool");
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
-    NEBufferHandle handle = {slot_index + 1};
+    NEImageHandle handle = (NEImageHandle)(slot_index + 1);
     NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
 
     /* Convert NEBufferUsage flags to VkBufferUsageFlags */
@@ -2499,7 +2499,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     if (vr != VK_SUCCESS || slot->image == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateImage failed (vr=%d, size=%u)", (int)vr, size);
         slot->occupied = false;
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
     /* Get memory requirements for the buffer */
@@ -2518,7 +2518,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
     /* Allocate memory for the buffer */
@@ -2534,7 +2534,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
     /* Bind memory to buffer */
@@ -2546,7 +2546,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
-        return NE_BUFFER_HANDLE_NULL;
+        return NE_IMAGE_HANDLE_NULL;
     }
 
     /* If initial data is provided, stage it to the buffer */
@@ -2558,7 +2558,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
             renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
-            return NE_BUFFER_HANDLE_NULL;
+            return NE_IMAGE_HANDLE_NULL;
         }
 
         /* Copy initial data into the staging buffer */
@@ -2591,7 +2591,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
             renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
             slot->image= VK_NULL_HANDLE;
             slot->occupied = false;
-            return NE_BUFFER_HANDLE_NULL;
+            return NE_IMAGE_HANDLE_NULL;
         }
 
         ne_cmd_transition_image_layout(renderer, renderer->transfer_cmd, handle, VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL);
@@ -2605,7 +2605,7 @@ NEBufferHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
             renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
-            return NE_BUFFER_HANDLE_NULL;
+            return NE_IMAGE_HANDLE_NULL;
         }
 
         /* Reset the command buffer for reuse */
@@ -2714,7 +2714,7 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
         return;
     }
 
-    uint32_t slot_index = handle - 1; /* Convert handle to index */
+    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
 
     if (slot_index >= renderer->buffer_cap || !renderer->buffers[slot_index].occupied) {
         NE_LOG_WARN("buffer_update called on invalid or destroyed buffer handle");
@@ -2852,7 +2852,7 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return;
     }
 
-    uint32_t slot_index = handle - 1; /* Convert handle to index */
+    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
 
     if (slot_index >= renderer->buffer_cap) {
         return;
@@ -3455,9 +3455,9 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
         return;
     }
 
-    const uint32_t index = handle - 1;
+    const uint32_t index = handle.id - 1;
     if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
-        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)", handle);
+        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)", handle.id);
         return;
     }
 
@@ -3501,14 +3501,14 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
 NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
                                                    const NEComputePipelineDesc *desc) {
     if (!renderer || !desc) {
-        return NE_PIPELINE_HANDLE_NULL;
+        return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
     /* ── Validate inputs ─────────────────────────────────────────────── */
 
     if (!ne_shader_handle_valid(desc->compute_shader)) {
         NE_LOG_ERROR("ne_compute_pipeline_create: compute_shader handle is null");
-        return NE_PIPELINE_HANDLE_NULL;
+        return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
     /* ── Resolve shader handles ──────────────────────────────────────── */
@@ -3518,7 +3518,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
     if (cs_index >= renderer->shader_cap || !renderer->shaders[cs_index].occupied) {
         NE_LOG_ERROR("ne_compute_pipeline_create: compute_shader handle (id=%u) is invalid or destroyed",
                      desc->compute_shader.id);
-        return NE_PIPELINE_HANDLE_NULL;
+        return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
     NEVulkanShaderSlot *cs_slot = &renderer->shaders[cs_index];
@@ -3541,7 +3541,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
     VkResult vr = renderer->fns.vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
     if (vr != VK_SUCCESS || layout == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreatePipelineLayout failed (vr=%d)", (int)vr);
-        return NE_PIPELINE_HANDLE_NULL;
+        return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
     /* ── Allocate pool slot ──────────────────────────────────────────── */
@@ -3555,7 +3555,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_compute_pipeline_create: pipeline pool allocation failed");
         renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
-        return NE_PIPELINE_HANDLE_NULL;
+        return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
     NEVulkanPipelineSlot *slot = &renderer->pipelines[slot_index];
@@ -3575,11 +3575,11 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
         slot->occupied = false;
         slot->layout = VK_NULL_HANDLE;
         slot->compute_entry = NULL;
-        return NE_PIPELINE_HANDLE_NULL;
+        return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
     slot->pipeline = VK_NULL_HANDLE;
 
-    return (NEPipelineHandle){ slot_index + 1 };
+    return (NEComputePipelineHandle){ slot_index + 1 };
 }
 
 void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle handle) {
@@ -3603,9 +3603,9 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
         return;
     }
 
-    const uint32_t index = pipeline - 1;
+    const uint32_t index = pipeline.id - 1;
     if (index >= r->pipeline_cap || !r->pipelines[index].occupied) {
-        NE_LOG_WARN("ne_render_pass_set_pipeline: pipeline handle (id=%u) is invalid or destroyed", pipeline);
+        NE_LOG_WARN("ne_render_pass_set_pipeline: pipeline handle (id=%u) is invalid or destroyed", pipeline.id);
         return;
     }
 
@@ -3639,9 +3639,9 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
         return;
     }
 
-    const uint32_t buf_index = buffer - 1;
+    const uint32_t buf_index = buffer.id - 1;
     if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
-        NE_LOG_WARN("ne_render_pass_set_vertex_buffer: buffer handle (id=%u) is invalid or destroyed", buffer);
+        NE_LOG_WARN("ne_render_pass_set_vertex_buffer: buffer handle (id=%u) is invalid or destroyed", buffer.id);
         return;
     }
 
@@ -3662,9 +3662,9 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
         return;
     }
 
-    const uint32_t buf_index = buffer - 1;
+    const uint32_t buf_index = buffer.id - 1;
     if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
-        NE_LOG_WARN("ne_render_pass_set_index_buffer: buffer handle (id=%u) is invalid or destroyed", buffer);
+        NE_LOG_WARN("ne_render_pass_set_index_buffer: buffer handle (id=%u) is invalid or destroyed", buffer.id);
         return;
     }
 
@@ -3721,9 +3721,9 @@ void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
     }
 
     NERenderer *r = pass->surface->renderer;
-    const uint32_t buf_index = handle - 1;
+    const uint32_t buf_index = handle.id - 1;
     if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
-        NE_LOG_WARN("ne_render_pass_update_buffer: invalid buffer handle (id=%u)", handle);
+        NE_LOG_WARN("ne_render_pass_update_buffer: invalid buffer handle (id=%u)", handle.id);
         return;
     }
 
