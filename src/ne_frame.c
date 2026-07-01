@@ -10,12 +10,9 @@ void ne_render_frame(void *user) {
 
     NERenderPass *pass = ne_renderer_begin_frame(ctx->renderer, ctx->surface);
     if (!pass) {
-        /* No drawable available (minimized, resizing, occluded) — skip the frame. */
         return;
     }
 
-    /* Per-frame updates (e.g. dynamic buffer writes) happen here, against the
-     * active pass, before any draw consumes the data. */
     if (ctx->on_update) {
         ctx->on_update(ctx, pass);
     }

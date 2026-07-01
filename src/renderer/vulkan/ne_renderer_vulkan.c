@@ -3043,7 +3043,7 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     if (spirv_messages) NE_LOG_INFO("(%s) %s\b", filename, spirv_messages);
 
     const NEShaderHandle handle = ne_shader_create(renderer, &(NEShaderDesc){
-        .stage         = NE_SHADER_STAGE_VERTEX,
+        .stage         = desc->stage,
         .bytecode      = sprv_bytes,
         .bytecode_size = sprv_size,
         .entry_point   = desc->entry_point,
@@ -3068,11 +3068,6 @@ void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
     }
 
     NEVulkanShaderSlot *slot = &renderer->shaders[index];
-
-    if (slot->module != VK_NULL_HANDLE && renderer->fns.vkDestroyShaderModule) {
-        renderer->fns.vkDestroyShaderModule(renderer->device, slot->module, NULL);
-        slot->module = VK_NULL_HANDLE;
-    }
 
     free(slot->entry_point);
     slot->entry_point = NULL;
@@ -3263,7 +3258,6 @@ static bool ne_vk_pipeline_compile(NERenderer *r, NEVulkanPipelineSlot *slot,
 
     VkResult vr = r->fns.vkCreateGraphicsPipelines(
         r->device, VK_NULL_HANDLE, 1, &gpci, NULL, &slot->pipeline);
-
     if (vr != VK_SUCCESS || slot->pipeline == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateGraphicsPipelines failed (vr=%d)", (int)vr);
         slot->compilation_failed = true;
@@ -3478,6 +3472,15 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
         slot->layout = VK_NULL_HANDLE;
     }
 
+    if (slot->vert_module != VK_NULL_HANDLE && renderer->fns.vkDestroyShaderModule) {
+        renderer->fns.vkDestroyShaderModule(renderer->device, slot->vert_module, NULL);
+        slot->vert_module = VK_NULL_HANDLE;
+    }
+    if (slot->frag_module != VK_NULL_HANDLE && renderer->fns.vkDestroyShaderModule) {
+        renderer->fns.vkDestroyShaderModule(renderer->device, slot->frag_module, NULL);
+        slot->frag_module = VK_NULL_HANDLE;
+    }
+
     free(slot->vert_entry);
     free(slot->frag_entry);
     free(slot->bindings);
@@ -3595,7 +3598,6 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
     if (!pass || !pass->surface || !pass->cmd) {
         return;
     }
-
 
     NERenderer *r = pass->surface->renderer;
     if (!r || !ne_pipeline_handle_valid(pipeline)) {
