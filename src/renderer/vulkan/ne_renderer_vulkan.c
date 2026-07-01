@@ -1529,8 +1529,6 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    glslang_initialize_process();
-
     g_renderer_singleton = r;
     return r;
 }
@@ -1960,7 +1958,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         surface->wants_swapchain_recreate = true;
     }
 
-    ne_window_show(surface->window);
+    ne_window_show_at_least_once(surface->window);
 
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
@@ -2953,6 +2951,12 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     else if(desc->stage == NE_SHADER_STAGE_FRAGMENT) stage = GLSLANG_STAGE_FRAGMENT;
     else if(desc->stage == NE_SHADER_STAGE_COMPUTE) stage = GLSLANG_STAGE_COMPUTE;
     else { return NE_SHADER_HANDLE_NULL;}
+
+    static bool glslang_ready = false;
+    if (!glslang_ready) {
+        glslang_initialize_process();
+        glslang_ready = true;
+    }
 
     size_t size = 0;
     void *src = ne_file_read(filename, &size);
