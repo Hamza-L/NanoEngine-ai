@@ -1529,6 +1529,8 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
+    glslang_initialize_process();
+
     g_renderer_singleton = r;
     return r;
 }
@@ -1650,6 +1652,7 @@ void ne_renderer_destroy(NERenderer *r) {
     }
 
     if (r == g_renderer_singleton) {
+        glslang_finalize_process();
         g_renderer_singleton = NULL;
     }
 
@@ -2955,7 +2958,6 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     size_t size = 0;
     void *src = ne_file_read(filename, &size);
 
-    glslang_initialize_process();
     glslang_input_t input = {
 	.language = GLSLANG_SOURCE_GLSL,
     .client = GLSLANG_CLIENT_VULKAN,
@@ -3021,8 +3023,10 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
         .entry_point   = desc->entry_point,
     });
 
+    free(sprv_bytes);
     glslang_program_delete(program);
     glslang_shader_delete(shader);
+    ne_file_free(src);
 
     return handle;
 }
