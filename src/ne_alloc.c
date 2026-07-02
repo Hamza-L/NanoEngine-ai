@@ -3,40 +3,70 @@
 #include <stdlib.h>
 #include <string.h>
 
-#define NE_VK_POOL_INITIAL_CAP 16
+#define NE_POOL_INITIAL_CAP 16
 
-/**
- * Generic pool allocation helper.
- * Works for any slot type whose first field is `bool occupied`.
- * Returns the slot index, or UINT32_MAX on failure.
- */
-uint32_t ne_pool_alloc(void **pool_ptr, uint32_t *count_ptr, uint32_t *cap_ptr, size_t slot_size) {
-    uint8_t *pool = (uint8_t *)*pool_ptr;
-    uint32_t cap = *cap_ptr;
+uint32_t ne_pool_alloc(NEPool *pool, size_t slot_size) {
+    uint8_t *slots = (uint8_t *)pool->slots;
 
-    /* Search for free slot */
-    for (uint32_t i = 0; i < cap; i++) {
-        bool *occupied = (bool *)(pool + i * slot_size);
+    for (uint32_t i = pool->hint; i < pool->cap; i++) {
+        bool *occupied = (bool *)(slots + i * slot_size);
         if (!*occupied) {
-            *count_ptr = *count_ptr + 1;
+            *occupied = true;
+            pool->count++;
+            pool->hint = i + 1;
             return i;
         }
     }
 
-    /* No free slot; grow pool */
-    uint32_t new_cap = cap == 0 ? NE_VK_POOL_INITIAL_CAP : cap * 2;
-    void *new_pool = realloc(*pool_ptr, new_cap * slot_size);
-    if (!new_pool) {
+    for (uint32_t i = 0; i < pool->hint; i++) {
+        bool *occupied = (bool *)(slots + i * slot_size);
+        if (!*occupied) {
+            *occupied = true;
+            pool->count++;
+            pool->hint = i + 1;
+            return i;
+        }
+    }
+
+    uint32_t new_cap = pool->cap == 0 ? NE_POOL_INITIAL_CAP : pool->cap * 2;
+    void *new_slots = realloc(pool->slots, new_cap * slot_size);
+    if (!new_slots) {
         return UINT32_MAX;
     }
 
-    /* Zero-initialize new slots */
-    memset((uint8_t *)new_pool + cap * slot_size, 0, (new_cap - cap) * slot_size);
+    memset((uint8_t *)new_slots + pool->cap * slot_size, 0, (new_cap - pool->cap) * slot_size);
 
-    uint32_t index = cap;
-    *pool_ptr = new_pool;
-    *cap_ptr = new_cap;
-    *count_ptr = *count_ptr + 1;
+    uint32_t index = pool->cap;
+    pool->slots = new_slots;
+    pool->cap = new_cap;
+    pool->count++;
+    pool->hint = index + 1;
 
+    *(bool *)((uint8_t *)new_slots + index * slot_size) = true;
     return index;
+}
+
+void ne_pool_free(NEPool *pool, uint32_t index, size_t slot_size) {
+    if (index >= pool->cap) {
+        return;
+    }
+    bool *occupied = (bool *)((uint8_t *)pool->slots + index * slot_size);
+    if (!*occupied) {
+        return;
+    }
+    *occupied = false;
+    if (pool->count > 0) {
+        pool->count--;
+    }
+    if (index < pool->hint) {
+        pool->hint = index;
+    }
+}
+
+void ne_pool_destroy(NEPool *pool) {
+    free(pool->slots);
+    pool->slots = NULL;
+    pool->count = 0;
+    pool->cap = 0;
+    pool->hint = 0;
 }

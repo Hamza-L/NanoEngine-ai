@@ -245,7 +245,6 @@ typedef struct NESwapchain {
     VkExtent2D extent;
 
     VkImage *images;
-    VkImageLayout *image_layouts;
     VkImageView *image_views;
     VkFramebuffer *framebuffers;
     uint32_t image_count;
@@ -277,16 +276,16 @@ struct NERenderer {
     VkInstance instance;
 
     VkPhysicalDevice phys;
+    VkPhysicalDeviceMemoryProperties mem_props;
     VkDevice device;
     VkQueue queue;
     uint32_t queue_family_index;
 
     NEVulkanFunctions fns;
 
-    /* Buffer resource pool */
-    NEVulkanBufferSlot *buffers;
-    uint32_t buffer_count;
-    uint32_t buffer_cap;
+    NEPool buffers;
+    NEPool shaders;
+    NEPool pipelines;
 
     /* Staging buffer for data uploads */
     VkBuffer staging_buffer;
@@ -297,40 +296,7 @@ struct NERenderer {
     /* Transfer command pool for staging uploads */
     VkCommandPool transfer_cmd_pool;
     VkCommandBuffer transfer_cmd;
-
-
-    /* ─── Descriptor Set Infrastructure (foundation for future GPU binding) ─── */
-    /* 
-     * Descriptor sets enable binding SSBOs, UBOs, and samplers to pipelines.
-     * This infrastructure is prepared for future implementation.
-     *
-     * Design:
-     * - Descriptor pool: centralized allocation point for descriptor sets
-     * - Descriptor set layout cache: avoids redundant layout creation
-     * - Binding structure: associates buffers/images with pipeline resources
-     *
-     * Current strategy: use push constants for uniforms (simpler, ~128-256 byte limit)
-     * Future: migrate to descriptor set-based binding for flexible resource management
-     *
-     * Integration points:
-     * - ne_pipeline_create(): will accept descriptor set layout requirements
-     * - ne_render_pass_bind_buffer(): future function to bind SSBOs to pipelines
-     * - Pipeline layout creation: will include descriptor set layouts
-     */
-    /* VkDescriptorPool descriptor_pool;         Placeholder: not yet created  */
-    /* uint32_t descriptor_pool_size;            Placeholder: pool capacity  */
-    /* VkDescriptorSetLayout *layout_cache;     Placeholder: reuse layouts  */
-    /* uint32_t layout_cache_count;             Placeholder: active layouts */
-
-    /* Shader resource pool */
-    NEVulkanShaderSlot *shaders;
-    uint32_t shader_count;
-    uint32_t shader_cap;
-
-    /* Pipeline resource pool */
-    NEVulkanPipelineSlot *pipelines;
-    uint32_t pipeline_count;
-    uint32_t pipeline_cap;
+    VkFence transfer_fence;
 
     /* Runtime GLSL → SPIR-V compilation via shaderc (loaded dynamically). */
     NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
@@ -347,6 +313,7 @@ struct NERenderSurface {
     VkRenderPass render_pass;
 
     bool wants_swapchain_recreate;
+    bool vsync;
 
     float clear_color[4];
 
@@ -390,68 +357,6 @@ static void *ne_vk_get_device(const NEVulkanFunctions *fns, VkDevice device, con
         return NULL;
     }
     return (void *)fns->vkGetDeviceProcAddr(device, name);
-}
-
-static bool ne_vk_has_extension(const NEVulkanFunctions *fns, const char *ext_name) {
-    if (!fns || !fns->vkEnumerateInstanceExtensionProperties || !ext_name) {
-        return false;
-    }
-
-    uint32_t count = 0;
-    VkResult r = fns->vkEnumerateInstanceExtensionProperties(NULL, &count, NULL);
-    if (r != VK_SUCCESS || count == 0) {
-        return false;
-    }
-
-    VkExtensionProperties *props = (VkExtensionProperties *)calloc(count, sizeof(VkExtensionProperties));
-    if (!props) {
-        return false;
-    }
-
-    r = fns->vkEnumerateInstanceExtensionProperties(NULL, &count, props);
-    bool found = false;
-    if (r == VK_SUCCESS) {
-        for (uint32_t i = 0; i < count; i++) {
-            if (strcmp(props[i].extensionName, ext_name) == 0) {
-                found = true;
-                break;
-            }
-        }
-    }
-
-    free(props);
-    return found;
-}
-
-static bool ne_vk_has_layer(const NEVulkanFunctions *fns, const char *layer_name) {
-    if (!fns || !fns->vkEnumerateInstanceLayerProperties || !layer_name) {
-        return false;
-    }
-
-    uint32_t count = 0;
-    VkResult r = fns->vkEnumerateInstanceLayerProperties(&count, NULL);
-    if (r != VK_SUCCESS || count == 0) {
-        return false;
-    }
-
-    VkLayerProperties *props = (VkLayerProperties *)calloc(count, sizeof(VkLayerProperties));
-    if (!props) {
-        return false;
-    }
-
-    r = fns->vkEnumerateInstanceLayerProperties(&count, props);
-    bool found = false;
-    if (r == VK_SUCCESS) {
-        for (uint32_t i = 0; i < count; i++) {
-            if (strcmp(props[i].layerName, layer_name) == 0) {
-                found = true;
-                break;
-            }
-        }
-    }
-
-    free(props);
-    return found;
 }
 
 static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
@@ -533,8 +438,6 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
 
     free(sc->images);
     sc->images = NULL;
-    free(sc->image_layouts);
-    sc->image_layouts = NULL;
     sc->image_count = 0;
 
     /* sem_render_finished is freed above (needs image_count). */
@@ -799,6 +702,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     }
 
     r->phys = chosen;
+    r->fns.vkGetPhysicalDeviceMemoryProperties(r->phys, &r->mem_props);
     r->device = device;
     r->queue_family_index = chosen_qfi;
 
@@ -841,6 +745,19 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
         NE_LOG_ERROR("vkAllocateCommandBuffers (transfer) failed (vr=%d)", (int)vr);
         r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
         r->transfer_cmd_pool = VK_NULL_HANDLE;
+        return false;
+    }
+
+    VkFenceCreateInfo fence_ci;
+    memset(&fence_ci, 0, sizeof(fence_ci));
+    fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+
+    vr = r->fns.vkCreateFence(r->device, &fence_ci, NULL, &r->transfer_fence);
+    if (vr != VK_SUCCESS || r->transfer_fence == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateFence (transfer) failed (vr=%d)", (int)vr);
+        r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
+        r->transfer_cmd_pool = VK_NULL_HANDLE;
+        r->transfer_cmd = VK_NULL_HANDLE;
         return false;
     }
 
@@ -908,16 +825,13 @@ static uint32_t ne_vk_clamp_u32(uint32_t v, uint32_t minv, uint32_t maxv) {
  */
 static uint32_t ne_vk_find_memory_type(NERenderer *r, uint32_t type_filter,
                                         VkMemoryPropertyFlags properties) {
-    if (!r || !r->fns.vkGetPhysicalDeviceMemoryProperties) {
+    if (!r) {
         return UINT32_MAX;
     }
 
-    VkPhysicalDeviceMemoryProperties mem_props;
-    r->fns.vkGetPhysicalDeviceMemoryProperties(r->phys, &mem_props);
-
-    for (uint32_t i = 0; i < mem_props.memoryTypeCount; i++) {
+    for (uint32_t i = 0; i < r->mem_props.memoryTypeCount; i++) {
         if ((type_filter & (1u << i)) &&
-            (mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
+            (r->mem_props.memoryTypes[i].propertyFlags & properties) == properties) {
             return i;
         }
     }
@@ -1289,8 +1203,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     }
 
     surface->sc.images = (VkImage *)calloc(img_count, sizeof(VkImage));
-    surface->sc.image_layouts = (VkImageLayout *)calloc(img_count, sizeof(VkImageLayout));
-    if (!surface->sc.images || !surface->sc.image_layouts) {
+    if (!surface->sc.images) {
         return false;
     }
 
@@ -1301,9 +1214,6 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     }
 
     surface->sc.image_count = img_count;
-    for (uint32_t i = 0; i < img_count; i++) {
-        surface->sc.image_layouts[i] = VK_IMAGE_LAYOUT_UNDEFINED;
-    }
 
     surface->sc.images_in_flight = (VkFence *)calloc(surface->sc.image_count, sizeof(VkFence));
     if (!surface->sc.images_in_flight) {
@@ -1612,49 +1522,43 @@ void ne_renderer_destroy(NERenderer *r) {
     r->surfaces = NULL;
 
     /* Destroy all live buffers. */
-    for (uint32_t i = 0; i < r->buffer_cap; i++) {
-        if (r->buffers[i].occupied) {
-            ne_vk_buffer_slot_free(r, &r->buffers[i]);
+    for (uint32_t i = 0; i < r->buffers.cap; i++) {
+        NEVulkanBufferSlot *bslot = &((NEVulkanBufferSlot*)r->buffers.slots)[i];
+        if (bslot->occupied) {
+            ne_vk_buffer_slot_free(r, bslot);
         }
     }
-    free(r->buffers);
-    r->buffers = NULL;
-    r->buffer_count = 0;
-    r->buffer_cap = 0;
+    ne_pool_destroy(&r->buffers);
 
     /* Destroy all live shaders. */
-    for (uint32_t i = 0; i < r->shader_cap; i++) {
-        if (r->shaders[i].occupied) {
-            if (r->shaders[i].module != VK_NULL_HANDLE && r->fns.vkDestroyShaderModule) {
-                r->fns.vkDestroyShaderModule(r->device, r->shaders[i].module, NULL);
+    for (uint32_t i = 0; i < r->shaders.cap; i++) {
+        NEVulkanShaderSlot *sslot = &((NEVulkanShaderSlot*)r->shaders.slots)[i];
+        if (sslot->occupied) {
+            if (sslot->module != VK_NULL_HANDLE && r->fns.vkDestroyShaderModule) {
+                r->fns.vkDestroyShaderModule(r->device, sslot->module, NULL);
             }
-            free(r->shaders[i].entry_point);
+            free(sslot->entry_point);
         }
     }
-    free(r->shaders);
-    r->shaders = NULL;
-    r->shader_count = 0;
-    r->shader_cap = 0;
+    ne_pool_destroy(&r->shaders);
 
     /* Destroy all live pipelines. */
-    for (uint32_t i = 0; i < r->pipeline_cap; i++) {
-        if (r->pipelines[i].occupied) {
-            if (r->pipelines[i].pipeline != VK_NULL_HANDLE && r->fns.vkDestroyPipeline) {
-                r->fns.vkDestroyPipeline(r->device, r->pipelines[i].pipeline, NULL);
+    for (uint32_t i = 0; i < r->pipelines.cap; i++) {
+        NEVulkanPipelineSlot *pslot = &((NEVulkanPipelineSlot*)r->pipelines.slots)[i];
+        if (pslot->occupied) {
+            if (pslot->pipeline != VK_NULL_HANDLE && r->fns.vkDestroyPipeline) {
+                r->fns.vkDestroyPipeline(r->device, pslot->pipeline, NULL);
             }
-            if (r->pipelines[i].layout != VK_NULL_HANDLE && r->fns.vkDestroyPipelineLayout) {
-                r->fns.vkDestroyPipelineLayout(r->device, r->pipelines[i].layout, NULL);
+            if (pslot->layout != VK_NULL_HANDLE && r->fns.vkDestroyPipelineLayout) {
+                r->fns.vkDestroyPipelineLayout(r->device, pslot->layout, NULL);
             }
-            free(r->pipelines[i].vert_entry);
-            free(r->pipelines[i].frag_entry);
-            free(r->pipelines[i].bindings);
-            free(r->pipelines[i].attributes);
+            free(pslot->vert_entry);
+            free(pslot->frag_entry);
+            free(pslot->bindings);
+            free(pslot->attributes);
         }
     }
-    free(r->pipelines);
-    r->pipelines = NULL;
-    r->pipeline_count = 0;
-    r->pipeline_cap = 0;
+    ne_pool_destroy(&r->pipelines);
 
     /* Destroy staging buffer and transfer command pool. */
     if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
@@ -1668,6 +1572,10 @@ void ne_renderer_destroy(NERenderer *r) {
     r->staging_mapped = NULL;
     r->staging_size = 0;
 
+    if (r->transfer_fence != VK_NULL_HANDLE && r->fns.vkDestroyFence) {
+        r->fns.vkDestroyFence(r->device, r->transfer_fence, NULL);
+        r->transfer_fence = VK_NULL_HANDLE;
+    }
     if (r->transfer_cmd_pool != VK_NULL_HANDLE && r->fns.vkDestroyCommandPool) {
         r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
         r->transfer_cmd_pool = VK_NULL_HANDLE;
@@ -1744,12 +1652,14 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
     surface->window = window;
     surface->surface = vk_surface;
     surface->wants_swapchain_recreate = true;
+    surface->vsync = true;
 
     surface->clear_color[0] = 0.1f;
     surface->clear_color[1] = 0.1f;
     surface->clear_color[2] = 0.2f;
     surface->clear_color[3] = 1.0f;
     if (desc) {
+        surface->vsync = desc->vsync;
         memcpy(surface->clear_color, desc->clear_color_rgba, sizeof(surface->clear_color));
     }
 
@@ -1819,10 +1729,8 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
-    const bool vsync = true; /* surface desc vsync is not stored yet; treat as true for now. */
-
     if (surface->wants_swapchain_recreate || surface->sc.swapchain == VK_NULL_HANDLE) {
-        if (!ne_vk_swapchain_create(surface, vsync)) {
+        if (!ne_vk_swapchain_create(surface, surface->vsync)) {
             return NULL;
         }
     }
@@ -1924,8 +1832,6 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     scissor.extent = surface->sc.extent;
 
     r->fns.vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-    surface->sc.image_layouts[image_index] = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
 
     g_active_pass.surface      = surface;
     g_active_pass.cmd          = cmd;
@@ -2050,41 +1956,30 @@ static bool ne_vk_submit_transfer_cmd(NERenderer *r, VkCommandBuffer cmd) {
         return false;
     }
 
-    /* Create a fence to wait for the transfer to complete */
-    VkFenceCreateInfo fence_info;
-    memset(&fence_info, 0, sizeof(fence_info));
-    fence_info.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-
-    VkFence fence = VK_NULL_HANDLE;
-    vr = r->fns.vkCreateFence(r->device, &fence_info, NULL, &fence);
+    vr = r->fns.vkResetFences(r->device, 1, &r->transfer_fence);
     if (vr != VK_SUCCESS) {
-        NE_LOG_ERROR("vkCreateFence (transfer) failed (vr=%d)", (int)vr);
+        NE_LOG_ERROR("vkResetFences (transfer) failed (vr=%d)", (int)vr);
         return false;
     }
 
-    /* Submit the transfer command buffer */
     VkSubmitInfo submit_info;
     memset(&submit_info, 0, sizeof(submit_info));
     submit_info.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &cmd;
 
-    vr = r->fns.vkQueueSubmit(r->queue, 1, &submit_info, fence);
+    vr = r->fns.vkQueueSubmit(r->queue, 1, &submit_info, r->transfer_fence);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit (transfer) failed (vr=%d)", (int)vr);
-        r->fns.vkDestroyFence(r->device, fence, NULL);
         return false;
     }
 
-    /* Wait for the transfer to complete */
-    vr = r->fns.vkWaitForFences(r->device, 1, &fence, VK_TRUE, UINT64_MAX);
+    vr = r->fns.vkWaitForFences(r->device, 1, &r->transfer_fence, VK_TRUE, UINT64_MAX);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkWaitForFences (transfer) failed (vr=%d)", (int)vr);
-        r->fns.vkDestroyFence(r->device, fence, NULL);
         return false;
     }
 
-    r->fns.vkDestroyFence(r->device, fence, NULL);
     return true;
 }
 
@@ -2099,19 +1994,14 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     }
 
     /* Allocate a slot from the buffer pool */
-    uint32_t slot_index = ne_pool_alloc(
-        (void **)&renderer->buffers,
-        &renderer->buffer_count,
-        &renderer->buffer_cap,
-        sizeof(NEVulkanBufferSlot)
-    );
+    uint32_t slot_index = ne_pool_alloc(&renderer->buffers, sizeof(NEVulkanBufferSlot));
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("failed to allocate buffer slot from pool");
         return NE_BUFFER_HANDLE_NULL;
     }
 
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     /* Convert NEBufferUsage flags to VkBufferUsageFlags */
     VkBufferUsageFlags vk_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT; /* All buffers can receive transfers */
@@ -2201,7 +2091,6 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             }
         }
 
-        slot->occupied = true;
         return (NEBufferHandle){ slot_index + 1 };
 
     dynamic_fail:
@@ -2221,6 +2110,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             }
         }
         slot->occupied = false;
+        renderer->buffers.count--;
         slot->dynamic = false;
         return NE_BUFFER_HANDLE_NULL;
     }
@@ -2237,6 +2127,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     if (vr != VK_SUCCESS || slot->buffer == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateBuffer failed (vr=%d, size=%u)", (int)vr, desc->size);
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_BUFFER_HANDLE_NULL;
     }
 
@@ -2256,6 +2147,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_BUFFER_HANDLE_NULL;
     }
 
@@ -2272,6 +2164,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_BUFFER_HANDLE_NULL;
     }
 
@@ -2284,6 +2177,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_BUFFER_HANDLE_NULL;
     }
 
@@ -2296,24 +2190,12 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
+            renderer->buffers.count--;
             return NE_BUFFER_HANDLE_NULL;
         }
 
         /* Copy initial data into the staging buffer */
         memcpy(renderer->staging_mapped, desc->initial_data, desc->size);
-
-        /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
-        VkMappedMemoryRange flush_range;
-        memset(&flush_range, 0, sizeof(flush_range));
-        flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        flush_range.memory = renderer->staging_memory;
-        flush_range.offset = 0;
-        flush_range.size = VK_WHOLE_SIZE;
-
-        vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
-        }
 
         /* Record and submit transfer command */
         VkCommandBufferBeginInfo begin_info;
@@ -2329,6 +2211,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
+            renderer->buffers.count--;
             return NE_BUFFER_HANDLE_NULL;
         }
 
@@ -2349,6 +2232,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
+            renderer->buffers.count--;
             return NE_BUFFER_HANDLE_NULL;
         }
 
@@ -2359,8 +2243,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         }
     }
 
-    /* Mark the slot as occupied and store metadata */
-    slot->occupied = true;
+    /* Store metadata (slot already marked occupied by ne_pool_alloc) */
     slot->usage = desc->usage;
     slot->size = desc->size;
 
@@ -2376,7 +2259,7 @@ static void ne_cmd_transition_image_layout(const NERenderer *renderer, const VkC
     }
 
     uint32_t slot_index = handle - 1; /* Convert handle to index */
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     VkImageMemoryBarrier barrier;
     memset(&barrier, 0, sizeof(barrier));
@@ -2429,7 +2312,7 @@ static void ne_cmd_copy_buffer_to_image(const NERenderer *renderer, const VkComm
     }
 
     uint32_t slot_index = handle - 1; /* Convert handle to index */
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     // copy the staging buffer to the GPU image buffer
     VkBufferImageCopy copy_region;
@@ -2458,12 +2341,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     }
 
     /* Allocate a slot from the buffer pool */
-    uint32_t slot_index = ne_pool_alloc(
-        (void **)&renderer->buffers,
-        &renderer->buffer_count,
-        &renderer->buffer_cap,
-        sizeof(NEVulkanBufferSlot)
-    );
+    uint32_t slot_index = ne_pool_alloc(&renderer->buffers, sizeof(NEVulkanBufferSlot));
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("failed to allocate buffer slot from pool");
@@ -2471,7 +2349,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     }
 
     NEImageHandle handle = (NEImageHandle)(slot_index + 1);
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     /* Convert NEBufferUsage flags to VkBufferUsageFlags */
     VkBufferUsageFlags vk_usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT; /* All buffers can receive transfers */
@@ -2514,6 +2392,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     if (vr != VK_SUCCESS || slot->image == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateImage failed (vr=%d, size=%u)", (int)vr, size);
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_IMAGE_HANDLE_NULL;
     }
 
@@ -2533,6 +2412,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_IMAGE_HANDLE_NULL;
     }
 
@@ -2549,6 +2429,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_IMAGE_HANDLE_NULL;
     }
 
@@ -2561,6 +2442,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
+        renderer->buffers.count--;
         return NE_IMAGE_HANDLE_NULL;
     }
 
@@ -2573,24 +2455,12 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
             renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
+            renderer->buffers.count--;
             return NE_IMAGE_HANDLE_NULL;
         }
 
         /* Copy initial data into the staging buffer */
         memcpy(renderer->staging_mapped, desc->initial_data, size);
-
-        /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
-        VkMappedMemoryRange flush_range;
-        memset(&flush_range, 0, sizeof(flush_range));
-        flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-        flush_range.memory = renderer->staging_memory;
-        flush_range.offset = 0;
-        flush_range.size = VK_WHOLE_SIZE;
-
-        vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
-        }
 
         /* Record and submit transfer command */
         VkCommandBufferBeginInfo begin_info;
@@ -2604,8 +2474,9 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
             renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
             renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
-            slot->image= VK_NULL_HANDLE;
+            slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
+            renderer->buffers.count--;
             return NE_IMAGE_HANDLE_NULL;
         }
 
@@ -2617,9 +2488,10 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
             NE_LOG_ERROR("failed to submit transfer command for initial data");
             renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
-            slot->buffer = VK_NULL_HANDLE;
+            renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+            slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
+            renderer->buffers.count--;
             return NE_IMAGE_HANDLE_NULL;
         }
 
@@ -2650,8 +2522,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         }
     }
 
-    /* Mark the slot as occupied and store metadata */
-    slot->occupied = true;
+    /* Store metadata (slot already marked occupied by ne_pool_alloc) */
     slot->usage = desc->usage;
     slot->width = desc->width;
     slot->height = desc->height;
@@ -2668,7 +2539,7 @@ void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *dat
 
     uint32_t slot_index = handle - 1; /* Convert handle to index */
 
-    if (slot_index >= renderer->buffer_cap || !renderer->buffers[slot_index].occupied) {
+    if (slot_index >= renderer->buffers.cap || !((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index].occupied) {
         NE_LOG_WARN("buffer_update called on invalid or destroyed buffer handle");
         return;
     }
@@ -2682,26 +2553,13 @@ void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *dat
     /* Copy the updated data into the staging buffer */
     memcpy((uint8_t *)renderer->staging_mapped, data, size);
 
-    /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
-    VkMappedMemoryRange flush_range;
-    memset(&flush_range, 0, sizeof(flush_range));
-    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    flush_range.memory = renderer->staging_memory;
-    flush_range.offset = 0;
-    flush_range.size = VK_WHOLE_SIZE;
-
-    VkResult vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
-    if (vr != VK_SUCCESS) {
-        NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
-    }
-
     /* Record the copy command */
     VkCommandBufferBeginInfo begin_info;
     memset(&begin_info, 0, sizeof(begin_info));
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+    VkResult vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
         return;
@@ -2731,12 +2589,12 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
 
     uint32_t slot_index = handle.id - 1; /* Convert handle to index */
 
-    if (slot_index >= renderer->buffer_cap || !renderer->buffers[slot_index].occupied) {
+    if (slot_index >= renderer->buffers.cap || !((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index].occupied) {
         NE_LOG_WARN("buffer_update called on invalid or destroyed buffer handle");
         return;
     }
 
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     /* Overflow-safe bounds check: `offset + size` could wrap around uint32_t. */
     if (size > slot->size || offset > slot->size - size) {
@@ -2772,26 +2630,13 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     /* Copy the updated data into the staging buffer */
     memcpy((uint8_t *)renderer->staging_mapped + offset, data, size);
 
-    /* Flush the entire staged memory (VK_WHOLE_SIZE avoids alignment issues) */
-    VkMappedMemoryRange flush_range;
-    memset(&flush_range, 0, sizeof(flush_range));
-    flush_range.sType = VK_STRUCTURE_TYPE_MAPPED_MEMORY_RANGE;
-    flush_range.memory = renderer->staging_memory;
-    flush_range.offset = 0;
-    flush_range.size = VK_WHOLE_SIZE;
-
-    VkResult vr = renderer->fns.vkFlushMappedMemoryRanges(renderer->device, 1, &flush_range);
-    if (vr != VK_SUCCESS) {
-        NE_LOG_WARN("vkFlushMappedMemoryRanges failed (vr=%d), continuing anyway", (int)vr);
-    }
-
     /* Record the copy command */
     VkCommandBufferBeginInfo begin_info;
     memset(&begin_info, 0, sizeof(begin_info));
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+    VkResult vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
         return;
@@ -2805,13 +2650,11 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
 
     renderer->fns.vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
 
-    /* Submit and wait for completion */
     if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
         NE_LOG_ERROR("failed to submit transfer command for buffer update");
         return;
     }
 
-    /* Reset the command buffer for reuse */
     vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
@@ -2823,19 +2666,18 @@ void ne_image_destroy(NERenderer *renderer, NEImageHandle handle) {
         return;
     }
 
-    uint32_t slot_index = handle - 1; /* Convert handle to index */
+    uint32_t slot_index = handle - 1;
 
-    if (slot_index >= renderer->buffer_cap) {
+    if (slot_index >= renderer->buffers.cap) {
         return;
     }
 
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     if (!slot->occupied) {
-        return; /* Already destroyed or never existed */
+        return;
     }
 
-    /* Destroy the buffer and free its memory */
     if (slot->image != VK_NULL_HANDLE && renderer->fns.vkDestroyImage) {
         renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
@@ -2851,15 +2693,7 @@ void ne_image_destroy(NERenderer *renderer, NEImageHandle handle) {
         slot->memory = VK_NULL_HANDLE;
     }
 
-    /* Mark the slot as unoccupied */
-    slot->occupied = false;
-    slot->usage = 0;
-    slot->size = 0;
-
-    /* Decrement the count */
-    if (renderer->buffer_count > 0) {
-        renderer->buffer_count--;
-    }
+    ne_pool_free(&renderer->buffers, slot_index, sizeof(NEVulkanBufferSlot));
 }
 
 void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
@@ -2867,29 +2701,21 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return;
     }
 
-    uint32_t slot_index = handle.id - 1; /* Convert handle to index */
+    uint32_t slot_index = handle.id - 1;
 
-    if (slot_index >= renderer->buffer_cap) {
+    if (slot_index >= renderer->buffers.cap) {
         return;
     }
 
-    NEVulkanBufferSlot *slot = &renderer->buffers[slot_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
 
     if (!slot->occupied) {
-        return; /* Already destroyed or never existed */
+        return;
     }
 
     ne_vk_buffer_slot_free(renderer, slot);
 
-    /* Mark the slot as unoccupied */
-    slot->occupied = false;
-    slot->usage = 0;
-    slot->size = 0;
-
-    /* Decrement the count */
-    if (renderer->buffer_count > 0) {
-        renderer->buffer_count--;
-    }
+    ne_pool_free(&renderer->buffers, slot_index, sizeof(NEVulkanBufferSlot));
 }
 
 /* ========================================================================
@@ -2949,12 +2775,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
         return NE_SHADER_HANDLE_NULL;
     }
 
-    const uint32_t slot_index = ne_pool_alloc(
-        (void **)&renderer->shaders,
-        &renderer->shader_count,
-        &renderer->shader_cap,
-        sizeof(NEVulkanShaderSlot)
-    );
+    const uint32_t slot_index = ne_pool_alloc(&renderer->shaders, sizeof(NEVulkanShaderSlot));
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_shader_create: shader pool allocation failed");
@@ -2962,8 +2783,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
         return NE_SHADER_HANDLE_NULL;
     }
 
-    NEVulkanShaderSlot *slot = &renderer->shaders[slot_index];
-    slot->occupied    = true;
+    NEVulkanShaderSlot *slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[slot_index];
     slot->stage       = (uint32_t)desc->stage;
     slot->module      = module;
     slot->entry_point = _strdup(desc->entry_point);
@@ -2972,6 +2792,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
         NE_LOG_ERROR("ne_shader_create: out of memory copying entry point name");
         renderer->fns.vkDestroyShaderModule(renderer->device, module, NULL);
         slot->occupied = false;
+        renderer->shaders.count--;
         slot->module   = VK_NULL_HANDLE;
         return NE_SHADER_HANDLE_NULL;
     }
@@ -2987,9 +2808,6 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     const char *filename = desc->filename;
 
     glslang_stage_t stage = {};
-    const char *ptr = filename;
-    while(*ptr) {ptr++;};
-    while(*ptr != '.') {ptr--;};
     if(desc->stage == NE_SHADER_STAGE_VERTEX) stage = GLSLANG_STAGE_VERTEX;
     else if(desc->stage == NE_SHADER_STAGE_FRAGMENT) stage = GLSLANG_STAGE_FRAGMENT;
     else if(desc->stage == NE_SHADER_STAGE_COMPUTE) stage = GLSLANG_STAGE_COMPUTE;
@@ -3077,28 +2895,31 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     return handle;
 }
 
+void ne_renderer_set_shader_optimization(NERenderer *renderer, NEShaderOptimization level) {
+    if (renderer) {
+        renderer->shader_optimization = level;
+    }
+}
+
 void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
     if (!renderer || !ne_shader_handle_valid(handle)) {
         return;
     }
 
     const uint32_t index = handle.id - 1;
-    if (index >= renderer->shader_cap || !renderer->shaders[index].occupied) {
+    if (index >= renderer->shaders.cap || !((NEVulkanShaderSlot*)renderer->shaders.slots)[index].occupied) {
         NE_LOG_WARN("ne_shader_destroy: invalid or already-destroyed shader handle (id=%u)",
                     handle.id);
         return;
     }
 
-    NEVulkanShaderSlot *slot = &renderer->shaders[index];
+    NEVulkanShaderSlot *slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[index];
 
     free(slot->entry_point);
     slot->entry_point = NULL;
     slot->stage       = 0;
-    slot->occupied    = false;
 
-    if (renderer->shader_count > 0) {
-        renderer->shader_count--;
-    }
+    ne_pool_free(&renderer->shaders, index, sizeof(NEVulkanShaderSlot));
 }
 
 /* ========================================================================
@@ -3318,19 +3139,19 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
     const uint32_t vs_index = desc->vertex_shader.id - 1;
     const uint32_t fs_index = desc->fragment_shader.id - 1;
 
-    if (vs_index >= renderer->shader_cap || !renderer->shaders[vs_index].occupied) {
+    if (vs_index >= renderer->shaders.cap || !((NEVulkanShaderSlot*)renderer->shaders.slots)[vs_index].occupied) {
         NE_LOG_ERROR("ne_pipeline_create: vertex_shader handle (id=%u) is invalid or destroyed",
                      desc->vertex_shader.id);
         return NE_PIPELINE_HANDLE_NULL;
     }
-    if (fs_index >= renderer->shader_cap || !renderer->shaders[fs_index].occupied) {
+    if (fs_index >= renderer->shaders.cap || !((NEVulkanShaderSlot*)renderer->shaders.slots)[fs_index].occupied) {
         NE_LOG_ERROR("ne_pipeline_create: fragment_shader handle (id=%u) is invalid or destroyed",
                      desc->fragment_shader.id);
         return NE_PIPELINE_HANDLE_NULL;
     }
 
-    NEVulkanShaderSlot *vs_slot = &renderer->shaders[vs_index];
-    NEVulkanShaderSlot *fs_slot = &renderer->shaders[fs_index];
+    NEVulkanShaderSlot *vs_slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[vs_index];
+    NEVulkanShaderSlot *fs_slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[fs_index];
 
     /* ── Deep-copy vertex layout ─────────────────────────────────────── */
 
@@ -3411,12 +3232,7 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
 
     /* ── Allocate pool slot ──────────────────────────────────────────── */
 
-    const uint32_t slot_index = ne_pool_alloc(
-        (void **)&renderer->pipelines,
-        &renderer->pipeline_count,
-        &renderer->pipeline_cap,
-        sizeof(NEVulkanPipelineSlot)
-    );
+    const uint32_t slot_index = ne_pool_alloc(&renderer->pipelines, sizeof(NEVulkanPipelineSlot));
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_pipeline_create: pipeline pool allocation failed");
@@ -3426,9 +3242,8 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
         return NE_PIPELINE_HANDLE_NULL;
     }
 
-    NEVulkanPipelineSlot *slot = &renderer->pipelines[slot_index];
+    NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[slot_index];
 
-    slot->occupied           = true;
     slot->needs_compile      = true;
     slot->compilation_failed = false;
 
@@ -3446,6 +3261,7 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
         free(bindings);
         free(attributes);
         slot->occupied = false;
+        renderer->pipelines.count--;
         slot->layout = VK_NULL_HANDLE;
         slot->vert_entry = NULL;
         slot->frag_entry = NULL;
@@ -3472,12 +3288,12 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     }
 
     const uint32_t index = handle.id - 1;
-    if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
+    if (index >= renderer->pipelines.cap || !((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index].occupied) {
         NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)", handle.id);
         return;
     }
 
-    NEVulkanPipelineSlot *slot = &renderer->pipelines[index];
+    NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index];
 
     /* Ensure the GPU is done with any command buffers referencing this pipeline. */
     if (renderer->device != VK_NULL_HANDLE && renderer->fns.vkDeviceWaitIdle) {
@@ -3514,11 +3330,8 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     slot->attributes   = NULL;
     slot->vert_module  = VK_NULL_HANDLE;
     slot->frag_module  = VK_NULL_HANDLE;
-    slot->occupied     = false;
 
-    if (renderer->pipeline_count > 0) {
-        renderer->pipeline_count--;
-    }
+    ne_pool_free(&renderer->pipelines, index, sizeof(NEVulkanPipelineSlot));
 }
 
 /* ── Compute pipeline stubs ──────────────────────────────────────────────── */
@@ -3540,13 +3353,13 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
 
     const uint32_t cs_index = desc->compute_shader.id - 1;
 
-    if (cs_index >= renderer->shader_cap || !renderer->shaders[cs_index].occupied) {
+    if (cs_index >= renderer->shaders.cap || !((NEVulkanShaderSlot*)renderer->shaders.slots)[cs_index].occupied) {
         NE_LOG_ERROR("ne_compute_pipeline_create: compute_shader handle (id=%u) is invalid or destroyed",
                      desc->compute_shader.id);
         return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
-    NEVulkanShaderSlot *cs_slot = &renderer->shaders[cs_index];
+    NEVulkanShaderSlot *cs_slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[cs_index];
 
     /* ── Create pipeline layout ──────────────────────────────────────── */
 
@@ -3570,12 +3383,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
     }
 
     /* ── Allocate pool slot ──────────────────────────────────────────── */
-    const uint32_t slot_index = ne_pool_alloc(
-        (void **)&renderer->pipelines,
-        &renderer->pipeline_count,
-        &renderer->pipeline_cap,
-        sizeof(NEVulkanPipelineSlot)
-    );
+    const uint32_t slot_index = ne_pool_alloc(&renderer->pipelines, sizeof(NEVulkanPipelineSlot));
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_compute_pipeline_create: pipeline pool allocation failed");
@@ -3583,9 +3391,8 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
         return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
-    NEVulkanPipelineSlot *slot = &renderer->pipelines[slot_index];
+    NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[slot_index];
 
-    slot->occupied           = true;
     slot->needs_compile      = true;
     slot->compilation_failed = false;
 
@@ -3598,6 +3405,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
         renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
         free(slot->compute_entry);
         slot->occupied = false;
+        renderer->pipelines.count--;
         slot->layout = VK_NULL_HANDLE;
         slot->compute_entry = NULL;
         return NE_COMPUTE_PIPELINE_HANDLE_NULL;
@@ -3628,12 +3436,12 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
     }
 
     const uint32_t index = pipeline.id - 1;
-    if (index >= r->pipeline_cap || !r->pipelines[index].occupied) {
+    if (index >= r->pipelines.cap || !((NEVulkanPipelineSlot*)r->pipelines.slots)[index].occupied) {
         NE_LOG_WARN("ne_render_pass_set_pipeline: pipeline handle (id=%u) is invalid or destroyed", pipeline.id);
         return;
     }
 
-    NEVulkanPipelineSlot *slot = &r->pipelines[index];
+    NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)r->pipelines.slots)[index];
 
     /* Deferred compilation: build the VkPipeline on first use. */
     if (slot->needs_compile) {
@@ -3664,12 +3472,12 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
     }
 
     const uint32_t buf_index = buffer.id - 1;
-    if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
+    if (buf_index >= r->buffers.cap || !((NEVulkanBufferSlot*)r->buffers.slots)[buf_index].occupied) {
         NE_LOG_WARN("ne_render_pass_set_vertex_buffer: buffer handle (id=%u) is invalid or destroyed", buffer.id);
         return;
     }
 
-    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&r->buffers[buf_index], pass->surface->sc.frame_index);
+    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->surface->sc.frame_index);
     VkDeviceSize offset = 0;
 
     r->fns.vkCmdBindVertexBuffers(pass->cmd, slot, 1, &vk_buffer, &offset);
@@ -3687,12 +3495,12 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
     }
 
     const uint32_t buf_index = buffer.id - 1;
-    if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
+    if (buf_index >= r->buffers.cap || !((NEVulkanBufferSlot*)r->buffers.slots)[buf_index].occupied) {
         NE_LOG_WARN("ne_render_pass_set_index_buffer: buffer handle (id=%u) is invalid or destroyed", buffer.id);
         return;
     }
 
-    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&r->buffers[buf_index], pass->surface->sc.frame_index);
+    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->surface->sc.frame_index);
     VkIndexType vk_type = (type == NE_INDEX_TYPE_UINT32) ? VK_INDEX_TYPE_UINT32
                                                          : VK_INDEX_TYPE_UINT16;
 
@@ -3746,12 +3554,12 @@ void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
 
     NERenderer *r = pass->surface->renderer;
     const uint32_t buf_index = handle.id - 1;
-    if (buf_index >= r->buffer_cap || !r->buffers[buf_index].occupied) {
+    if (buf_index >= r->buffers.cap || !((NEVulkanBufferSlot*)r->buffers.slots)[buf_index].occupied) {
         NE_LOG_WARN("ne_render_pass_update_buffer: invalid buffer handle (id=%u)", handle.id);
         return;
     }
 
-    NEVulkanBufferSlot *slot = &r->buffers[buf_index];
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)r->buffers.slots)[buf_index];
 
     /* Overflow-safe bounds check: `offset + size` could wrap around uint32_t. */
     if (size > slot->size || offset > slot->size - size) {

@@ -109,17 +109,9 @@ struct NERenderer {
     bool device_ready;
     bool device_failed;
 
-    NEShaderSlot *shaders;
-    uint32_t shader_count;
-    uint32_t shader_cap;
-
-    NEBufferSlot *buffers;
-    uint32_t buffer_count;
-    uint32_t buffer_cap;
-
-    NEPipelineSlot *pipelines;
-    uint32_t pipeline_count;
-    uint32_t pipeline_cap;
+    NEPool shaders;
+    NEPool buffers;
+    NEPool pipelines;
 
     /* Chosen once a surface + device are ready (in begin_frame). */
     WGPUTextureFormat surface_format;
@@ -287,26 +279,26 @@ void ne_renderer_destroy(NERenderer *renderer) {
         return;
     }
 
-    for (uint32_t i = 0; i < renderer->shader_cap; i++) {
-        if (renderer->shaders[i].occupied) {
-            ne_shader_slot_release(&renderer->shaders[i]);
+    for (uint32_t i = 0; i < renderer->shaders.cap; i++) {
+        if (((NEShaderSlot*)renderer->shaders.slots)[i].occupied) {
+            ne_shader_slot_release(&((NEShaderSlot*)renderer->shaders.slots)[i]);
         }
     }
-    free(renderer->shaders);
+    ne_pool_destroy(&renderer->shaders);
 
-    for (uint32_t i = 0; i < renderer->buffer_cap; i++) {
-        if (renderer->buffers[i].occupied) {
-            ne_buffer_slot_release(&renderer->buffers[i]);
+    for (uint32_t i = 0; i < renderer->buffers.cap; i++) {
+        if (((NEBufferSlot*)renderer->buffers.slots)[i].occupied) {
+            ne_buffer_slot_release(&((NEBufferSlot*)renderer->buffers.slots)[i]);
         }
     }
-    free(renderer->buffers);
+    ne_pool_destroy(&renderer->buffers);
 
-    for (uint32_t i = 0; i < renderer->pipeline_cap; i++) {
-        if (renderer->pipelines[i].occupied) {
-            ne_pipeline_slot_release(&renderer->pipelines[i]);
+    for (uint32_t i = 0; i < renderer->pipelines.cap; i++) {
+        if (((NEPipelineSlot*)renderer->pipelines.slots)[i].occupied) {
+            ne_pipeline_slot_release(&((NEPipelineSlot*)renderer->pipelines.slots)[i]);
         }
     }
-    free(renderer->pipelines);
+    ne_pool_destroy(&renderer->pipelines);
 
     /* Tolerate a renderer that never became ready (any of these may be NULL). */
     if (renderer->queue) {
@@ -631,15 +623,13 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         return NE_BUFFER_HANDLE_NULL;
     }
 
-    uint32_t index = ne_pool_alloc((void **)&renderer->buffers, &renderer->buffer_count,
-                                   &renderer->buffer_cap, sizeof(NEBufferSlot));
+    uint32_t index = ne_pool_alloc(&renderer->buffers, sizeof(NEBufferSlot));
     if (index == UINT32_MAX) {
         NE_LOG_ERROR("buffer pool allocation failed");
         return NE_BUFFER_HANDLE_NULL;
     }
 
-    NEBufferSlot *slot = &renderer->buffers[index];
-    slot->occupied = true;
+    NEBufferSlot *slot = &((NEBufferSlot*)renderer->buffers.slots)[index];
     slot->dynamic = desc->dynamic;
     slot->usage = desc->usage;
     slot->size = desc->size;
@@ -681,10 +671,10 @@ static WGPUBuffer ne_buffer_get_for_frame(const NERenderer *renderer, NEBufferHa
         return NULL;
     }
     uint32_t index = handle.id - 1;
-    if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) {
+    if (index >= renderer->buffers.cap || !((NEBufferSlot*)renderer->buffers.slots)[index].occupied) {
         return NULL;
     }
-    const NEBufferSlot *slot = &renderer->buffers[index];
+    const NEBufferSlot *slot = &((NEBufferSlot*)renderer->buffers.slots)[index];
     uint32_t copy = frame_index % ne_buffer_slot_copy_count(slot);
     return slot->copies[copy];
 }
@@ -696,11 +686,11 @@ static NEBufferSlot *ne_buffer_update_validate(NERenderer *renderer, NEBufferHan
         return NULL;
     }
     uint32_t index = handle.id - 1;
-    if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) {
+    if (index >= renderer->buffers.cap || !((NEBufferSlot*)renderer->buffers.slots)[index].occupied) {
         NE_LOG_WARN("attempted to update invalid buffer handle (id=%u)", handle.id);
         return NULL;
     }
-    NEBufferSlot *slot = &renderer->buffers[index];
+    NEBufferSlot *slot = &((NEBufferSlot*)renderer->buffers.slots)[index];
     /* Overflow-safe bounds check: `offset + size` could wrap around uint32_t. */
     if (size > slot->size || offset > slot->size - size) {
         NE_LOG_ERROR("buffer update out of bounds (offset=%u + size=%u > buffer_size=%u)",
@@ -738,14 +728,12 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return;
     }
     uint32_t index = handle.id - 1;
-    if (index >= renderer->buffer_cap || !renderer->buffers[index].occupied) {
+    if (index >= renderer->buffers.cap || !((NEBufferSlot*)renderer->buffers.slots)[index].occupied) {
         NE_LOG_WARN("attempted to destroy invalid buffer handle (id=%u)", handle.id);
         return;
     }
-    ne_buffer_slot_release(&renderer->buffers[index]);
-    if (renderer->buffer_count > 0) {
-        renderer->buffer_count--;
-    }
+    ne_buffer_slot_release(&((NEBufferSlot*)renderer->buffers.slots)[index]);
+    ne_pool_free(&renderer->buffers, index, sizeof(NEBufferSlot));
 }
 
 /* ── Shaders ────────────────────────────────────────────────────────────── */
@@ -795,16 +783,14 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
         return NE_SHADER_HANDLE_NULL;
     }
 
-    uint32_t index = ne_pool_alloc((void **)&renderer->shaders, &renderer->shader_count,
-                                   &renderer->shader_cap, sizeof(NEShaderSlot));
+    uint32_t index = ne_pool_alloc(&renderer->shaders, sizeof(NEShaderSlot));
     if (index == UINT32_MAX) {
         NE_LOG_ERROR("shader pool allocation failed");
         wgpuShaderModuleRelease(module);
         return NE_SHADER_HANDLE_NULL;
     }
 
-    NEShaderSlot *slot = &renderer->shaders[index];
-    slot->occupied = true;
+    NEShaderSlot *slot = &((NEShaderSlot*)renderer->shaders.slots)[index];
     slot->stage = desc->stage;
     slot->module = module;
     slot->entry_point = ne_strdup(desc->entry_point);
@@ -817,14 +803,12 @@ void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
         return;
     }
     uint32_t index = handle.id - 1;
-    if (index >= renderer->shader_cap || !renderer->shaders[index].occupied) {
+    if (index >= renderer->shaders.cap || !((NEShaderSlot*)renderer->shaders.slots)[index].occupied) {
         NE_LOG_WARN("attempted to destroy invalid shader handle (id=%u)", handle.id);
         return;
     }
-    ne_shader_slot_release(&renderer->shaders[index]);
-    if (renderer->shader_count > 0) {
-        renderer->shader_count--;
-    }
+    ne_shader_slot_release(&((NEShaderSlot*)renderer->shaders.slots)[index]);
+    ne_pool_free(&renderer->shaders, index, sizeof(NEShaderSlot));
 }
 
 static const NEShaderSlot *ne_shader_get_slot(const NERenderer *renderer, NEShaderHandle handle) {
@@ -832,10 +816,10 @@ static const NEShaderSlot *ne_shader_get_slot(const NERenderer *renderer, NEShad
         return NULL;
     }
     uint32_t index = handle.id - 1;
-    if (index >= renderer->shader_cap || !renderer->shaders[index].occupied) {
+    if (index >= renderer->shaders.cap || !((NEShaderSlot*)renderer->shaders.slots)[index].occupied) {
         return NULL;
     }
-    return &renderer->shaders[index];
+    return &((NEShaderSlot*)renderer->shaders.slots)[index];
 }
 
 /* ── Pipelines ──────────────────────────────────────────────────────────── */
@@ -986,16 +970,14 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
         return NE_PIPELINE_HANDLE_NULL;
     }
 
-    uint32_t index = ne_pool_alloc((void **)&renderer->pipelines, &renderer->pipeline_count,
-                                   &renderer->pipeline_cap, sizeof(NEPipelineSlot));
+    uint32_t index = ne_pool_alloc(&renderer->pipelines, sizeof(NEPipelineSlot));
     if (index == UINT32_MAX) {
         NE_LOG_ERROR("pipeline pool allocation failed");
         wgpuRenderPipelineRelease(pipeline);
         return NE_PIPELINE_HANDLE_NULL;
     }
 
-    NEPipelineSlot *slot = &renderer->pipelines[index];
-    slot->occupied = true;
+    NEPipelineSlot *slot = &((NEPipelineSlot*)renderer->pipelines.slots)[index];
     slot->pipeline = pipeline;
     slot->topology = ne_topology_to_wgpu(desc->topology);
 
@@ -1007,14 +989,12 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
         return;
     }
     uint32_t index = handle.id - 1;
-    if (index >= renderer->pipeline_cap || !renderer->pipelines[index].occupied) {
+    if (index >= renderer->pipelines.cap || !((NEPipelineSlot*)renderer->pipelines.slots)[index].occupied) {
         NE_LOG_WARN("attempted to destroy invalid pipeline handle (id=%u)", handle.id);
         return;
     }
-    ne_pipeline_slot_release(&renderer->pipelines[index]);
-    if (renderer->pipeline_count > 0) {
-        renderer->pipeline_count--;
-    }
+    ne_pipeline_slot_release(&((NEPipelineSlot*)renderer->pipelines.slots)[index]);
+    ne_pool_free(&renderer->pipelines, index, sizeof(NEPipelineSlot));
 }
 
 NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer, const NEComputePipelineDesc *desc) {
@@ -1045,12 +1025,12 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
     }
     NERenderer *renderer = pass->surface->renderer;
     uint32_t index = pipeline.id - 1;
-    if (!ne_pipeline_handle_valid(pipeline) || index >= renderer->pipeline_cap ||
-        !renderer->pipelines[index].occupied) {
+    if (!ne_pipeline_handle_valid(pipeline) || index >= renderer->pipelines.cap ||
+        !((NEPipelineSlot*)renderer->pipelines.slots)[index].occupied) {
         NE_LOG_WARN("set_pipeline: invalid pipeline handle (id=%u)", pipeline.id);
         return;
     }
-    NEPipelineSlot *slot = &renderer->pipelines[index];
+    NEPipelineSlot *slot = &((NEPipelineSlot*)renderer->pipelines.slots)[index];
     wgpuRenderPassEncoderSetPipeline(enc, slot->pipeline);
     pass->surface->current_topology = slot->topology;
 }
