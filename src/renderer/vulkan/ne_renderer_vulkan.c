@@ -30,25 +30,15 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
- * Vulkan backend bring-up plan (incremental):
- * 1) Create VkInstance (done)
- * 2) Create VkSurfaceKHR (done)
- * 3) Pick physical device + create VkDevice + queue (done)
- * 4) Create swapchain
- * 5) Clear + present (no pipelines, no render pass yet)
- */
-
 /* Global */
 static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
 static PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
 
+/* Instance */
 static PFN_vkCreateInstance vkCreateInstance;
+static PFN_vkDestroyInstance vkDestroyInstance;
 static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
 static PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties;
-
-/* Instance */
-static PFN_vkDestroyInstance vkDestroyInstance;
 static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
 static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
 static PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
@@ -198,16 +188,14 @@ static VkBuffer ne_vk_buffer_for_frame(const NEVulkanBufferSlot *slot, uint32_t 
 }
 
 /* ── Shader resource pool ───────────────────────────────────────────────── */
-
 typedef struct NEVulkanShaderSlot {
     bool occupied;
     uint32_t stage;             /* NEShaderStage value */
     VkShaderModule module;
-    char *entry_point;          /* strdup'd entry point name */
+    char *entry_point;          /* entry point name */
 } NEVulkanShaderSlot;
 
 /* ── Pipeline resource pool ─────────────────────────────────────────────── */
-
 typedef struct NEVulkanPipelineSlot {
     bool occupied;
     bool needs_compile;         /* true until first successful vkCreateGraphicsPipelines */
@@ -300,6 +288,12 @@ struct NERenderer {
     struct NERenderSurface *surfaces;
 };
 
+struct NERenderPass {
+    NERenderSurface *surface;
+    VkCommandBuffer cmd;
+    VkPipelineLayout bound_layout;
+};
+
 struct NERenderSurface {
     NERenderer *renderer;
     NEWindow *window;
@@ -314,23 +308,9 @@ struct NERenderSurface {
     float clear_color[4];
 
     struct NERenderSurface *next;
+
+    NERenderPass pass;
 };
-
-
-
-/**
- * NERenderPass is currently backed by the surface itself.
- * This may become a separate allocation when multiple render passes per frame
- * are supported.
- */
-struct NERenderPass {
-    NERenderSurface *surface;
-    VkCommandBuffer cmd;              /* live command buffer for this frame */
-    VkPipelineLayout bound_layout;    /* layout of currently bound pipeline (for push constants) */
-};
-
-/* Per-frame render pass instance (valid between begin_frame / end_frame). */
-static NERenderPass g_active_pass = {0};
 
 static NERenderer *g_renderer_singleton = NULL;
 
@@ -1825,10 +1805,10 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    g_active_pass.surface      = surface;
-    g_active_pass.cmd          = cmd;
-    g_active_pass.bound_layout = VK_NULL_HANDLE;
-    return &g_active_pass;
+    surface->pass.surface      = surface;
+    surface->pass.cmd          = cmd;
+    surface->pass.bound_layout = VK_NULL_HANDLE;
+    return &surface->pass;
 }
 
 void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
