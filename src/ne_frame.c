@@ -21,5 +21,5 @@ void ne_render_frame(void *user) {
     ne_render_pass_set_vertex_buffer(pass, 0, ctx->vertex_buffer);
     ne_render_pass_draw(pass, 0, ctx->vertex_count);
 
-    ne_renderer_end_frame(ctx->renderer, pass);
+    ne_renderer_end_frame(ctx->renderer, ctx->surface);
 }

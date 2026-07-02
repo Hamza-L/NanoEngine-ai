@@ -129,9 +129,9 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
  *
  * Parameters:
  * - `renderer`: Renderer instance.
- * - `pass`: Render pass returned by `ne_renderer_begin_frame`.
+ * - `surface`: Surface instance passed to `ne_renderer_begin_frame`.
  */
-void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass);
+void ne_renderer_end_frame(NERenderer *renderer, NERenderSurface *surface);
 
 #ifdef __cplusplus
 }

@@ -289,7 +289,6 @@ struct NERenderer {
 };
 
 struct NERenderPass {
-    NERenderSurface *surface;
     VkCommandBuffer cmd;
     VkPipelineLayout bound_layout;
     VkRenderPass render_pass;
@@ -1807,7 +1806,6 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-    surface->pass.surface      = surface;
     surface->pass.cmd          = cmd;
     surface->pass.bound_layout = VK_NULL_HANDLE;
     surface->pass.render_pass  = surface->render_pass;
@@ -1815,29 +1813,24 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     return &surface->pass;
 }
 
-void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
-    if (!r || !pass || !pass->surface) {
+void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
+    if (!r || !surface || surface->renderer != r) {
         return;
     }
 
-    NERenderSurface *surface = pass->surface;
-    if (surface->renderer != r) {
+    NERenderPass *pass = &surface->pass;
+    if (!pass->cmd) {
         return;
     }
-
 
     /* ── Close the render pass and command buffer ────────────────────── */
 
-    VkCommandBuffer cmd = pass->cmd;
-    vkCmdEndRenderPass(cmd);
+    vkCmdEndRenderPass(pass->cmd);
 
-    VkResult vr = vkEndCommandBuffer(cmd);
+    VkResult vr = vkEndCommandBuffer(pass->cmd);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkEndCommandBuffer failed (vr=%d)", (int)vr);
-        pass->surface      = NULL;
-        pass->cmd          = VK_NULL_HANDLE;
-        pass->bound_layout = VK_NULL_HANDLE;
-        pass->render_pass  = VK_NULL_HANDLE;
+        *pass = (NERenderPass){0};
         surface->wants_swapchain_recreate = true;
         return;
     }
@@ -1888,10 +1881,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
 
     surface->sc.frame_index = (surface->sc.frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
-    pass->surface      = NULL;
-    pass->cmd          = VK_NULL_HANDLE;
-    pass->bound_layout = VK_NULL_HANDLE;
-    pass->render_pass  = VK_NULL_HANDLE;
+    *pass = (NERenderPass){0};
 }
 
 
@@ -3403,11 +3393,11 @@ void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle h
  * ======================================================================== */
 
 void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) {
-    if (!pass || !pass->surface || !pass->cmd) {
+    if (!pass || !pass->cmd) {
         return;
     }
 
-    NERenderer *r = pass->surface->renderer;
+    NERenderer *r = g_renderer_singleton;
     if (!r || !ne_pipeline_handle_valid(pipeline)) {
         NE_LOG_WARN("ne_render_pass_set_pipeline: invalid pass or pipeline handle");
         return;
@@ -3439,12 +3429,12 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
 
 void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
                                       NEBufferHandle buffer) {
-    if (!pass || !pass->surface || !pass->cmd) {
+    if (!pass || !pass->cmd) {
         return;
     }
 
 
-    NERenderer *r = pass->surface->renderer;
+    NERenderer *r = g_renderer_singleton;
     if (!r || !ne_buffer_handle_valid(buffer)) {
         return;
     }
@@ -3463,11 +3453,11 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
 
 void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
                                      NEIndexType type) {
-    if (!pass || !pass->surface || !pass->cmd) {
+    if (!pass || !pass->cmd) {
         return;
     }
 
-    NERenderer *r = pass->surface->renderer;
+    NERenderer *r = g_renderer_singleton;
     if (!r || !ne_buffer_handle_valid(buffer)) {
         return;
     }
@@ -3486,7 +3476,7 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
 }
 
 void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, uint64_t slot, const void *data, size_t size) {
-    if (!pass || !pass->surface || !pass->cmd || !data || size == 0) {
+    if (!pass || !pass->cmd || !data || size == 0) {
         return;
     }
 
@@ -3495,7 +3485,7 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, ui
         return;
     }
 
-    NERenderer *r = pass->surface->renderer;
+    NERenderer *r = g_renderer_singleton;
     if (!r) {
         return;
     }
@@ -3526,11 +3516,11 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, ui
 
 void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
                                   const void *data, uint32_t size, uint32_t offset) {
-    if (!pass || !pass->surface || !data || size == 0 || !ne_buffer_handle_valid(handle)) {
+    if (!pass || !pass->cmd || !data || size == 0 || !ne_buffer_handle_valid(handle)) {
         return;
     }
 
-    NERenderer *r = pass->surface->renderer;
+    NERenderer *r = g_renderer_singleton;
     const uint32_t buf_index = handle.id - 1;
     if (buf_index >= r->buffers.cap || !((NEVulkanBufferSlot*)r->buffers.slots)[buf_index].occupied) {
         NE_LOG_WARN("ne_render_pass_update_buffer: invalid buffer handle (id=%u)", handle.id);
@@ -3564,7 +3554,7 @@ void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
 }
 
 void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t vertex_count) {
-    if (!pass || !pass->surface || !pass->cmd || vertex_count == 0) {
+    if (!pass || !pass->cmd || vertex_count == 0) {
         return;
     }
 
@@ -3573,7 +3563,7 @@ void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t ver
 
 void ne_render_pass_draw_indexed(NERenderPass *pass, uint64_t index_count,
                                  uint64_t first_index, int64_t vertex_offset) {
-    if (!pass || !pass->surface || !pass->cmd || index_count == 0) {
+    if (!pass || !pass->cmd || index_count == 0) {
         return;
     }
 

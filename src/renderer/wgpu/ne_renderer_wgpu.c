@@ -541,13 +541,8 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
     return &g_active_pass;
 }
 
-void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
-    if (!renderer || !pass || !pass->surface) {
-        return;
-    }
-
-    NERenderSurface *surface = pass->surface;
-    if (surface->renderer != renderer) {
+void ne_renderer_end_frame(NERenderer *renderer, NERenderSurface *surface) {
+    if (!renderer || !surface || surface->renderer != renderer) {
         return;
     }
 
@@ -563,12 +558,6 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
         wgpuQueueSubmit(renderer->queue, 1, &cmd);
         wgpuCommandBufferRelease(cmd);
     }
-
-    /*
-     * No present call on the web — the browser presents when control returns to
-     * it (after the rAF callback completes). A native Dawn build would call
-     * wgpuSurfacePresent(surface->surface) here.
-     */
 
     if (surface->pass_encoder) {
         wgpuRenderPassEncoderRelease(surface->pass_encoder);
@@ -586,8 +575,6 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
         wgpuTextureRelease(surface->texture);
         surface->texture = NULL;
     }
-
-    pass->surface = NULL;
 }
 
 /* ── Buffers ────────────────────────────────────────────────────────────── */

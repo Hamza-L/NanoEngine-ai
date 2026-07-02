@@ -533,13 +533,8 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
 #undef NE_MTL_FRAME_ABORT
 }
 
-void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
-    if (!renderer || !pass || !pass->surface) {
-        return;
-    }
-
-    NERenderSurface *surface = pass->surface;
-    if (surface->renderer != renderer) {
+void ne_renderer_end_frame(NERenderer *renderer, NERenderSurface *surface) {
+    if (!renderer || !surface || surface->renderer != renderer) {
         return;
     }
 
@@ -572,8 +567,6 @@ void ne_renderer_end_frame(NERenderer *renderer, NERenderPass *pass) {
 
     (void)CFBridgingRelease(surface->drawable);
     surface->drawable = NULL;
-
-    pass->surface = NULL;
 }
 
 /* ── Shaders ────────────────────────────────────────────────────────────── */
