@@ -48,6 +48,7 @@ struct NEWindow {
     bool open;
     bool shown;
     bool destroying;
+    bool shown_at_least_once;
 
     uint32_t mouse_buttons_down_mask;
 
@@ -633,7 +634,6 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
 
     if(desc->undecorated){
         MARGINS margins = {-1,-1,-1,-1};
-        DwmEnableComposition(DWM_EC_ENABLECOMPOSITION);
         DwmExtendFrameIntoClientArea(hwnd, &margins);
     }
 
@@ -685,6 +685,17 @@ void ne_window_show(NEWindow *window) {
     ShowWindow(window->hwnd, SW_SHOW);
     UpdateWindow(window->hwnd);
     window->shown = true;
+}
+
+void ne_window_show_at_least_once(NEWindow *window) {
+    if (!window || !window->hwnd || window->shown) {
+        return;
+    }
+
+    if (!window->shown_at_least_once) {
+        window->shown_at_least_once = true;
+        ne_window_show(window);
+    }
 }
 
 void ne_window_hide(NEWindow *window) {
@@ -834,15 +845,6 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
 
 bool ne_window_is_open(const NEWindow *window) {
     return window && window->open;
-}
-
-void ne_window_invalidate(const NEWindow *window) {
-    InvalidateRect(window->hwnd, NULL, FALSE);
-}
-
-void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void)) {
-    (void)window;
-    (void)presentFrame;
 }
 
 void ne_set_window_render_dispatch(NEWindow *window, void(*render)(void *user), void *user) {

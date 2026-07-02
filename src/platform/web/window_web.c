@@ -60,7 +60,6 @@ struct NEWindow {
 
     uint32_t mouse_buttons_down_mask;
 
-    void (*present_frame)(void);
     void (*render_frame)(void *user);
     void *render_frame_user;
 
@@ -508,17 +507,6 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
 
 bool ne_window_is_open(const NEWindow *window) {
     return window && window->open;
-}
-
-void ne_window_invalidate(const NEWindow *window) {
-    (void)window; /* The rAF loop redraws every frame; nothing to invalidate. */
-}
-
-void ne_set_window_present_dispatch(NEWindow *window, void (*presentFrame)(void)) {
-    if (!window) {
-        return;
-    }
-    window->present_frame = presentFrame;
 }
 
 void ne_set_window_render_dispatch(NEWindow *window, void (*render)(void *user), void *user) {

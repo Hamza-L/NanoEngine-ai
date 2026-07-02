@@ -322,6 +322,14 @@ void ne_window_destroy(NEWindow *window);
 void ne_window_show(NEWindow *window);
 
 /**
+ * Show a window once if it hasn't ever been shown since being created.
+ *
+ * Parameters:
+ * - `window`: Window instance.
+ */
+void ne_window_show_at_least_once(NEWindow *window);
+
+/**
  * Hide a window.
  *
  * Parameters:
@@ -468,10 +476,6 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
  * - `true` if the window exists and is open, otherwise `false`.
  */
 bool ne_window_is_open(const NEWindow *window);
-
-void ne_window_invalidate(const NEWindow *window);
-
-void ne_set_window_present_dispatch(NEWindow *window, void(*presentFrame)(void));
 
 /**
  * Register the callback the platform's frame driver invokes to render a frame.
