@@ -341,34 +341,31 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
         return;
     }
 
-    if (r->device != VK_NULL_HANDLE && vkDeviceWaitIdle) {
+    if (r->device != VK_NULL_HANDLE) {
         (void)vkDeviceWaitIdle(r->device);
     }
 
-    /* Destroy framebuffers before image views (framebuffers reference views). */
-    if (sc->framebuffers && vkDestroyFramebuffer) {
+    if (sc->framebuffers) {
         for (uint32_t i = 0; i < sc->image_count; i++) {
             if (sc->framebuffers[i] != VK_NULL_HANDLE) {
                 vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
-                sc->framebuffers[i] = VK_NULL_HANDLE;
             }
         }
         free(sc->framebuffers);
         sc->framebuffers = NULL;
     }
 
-    if (sc->image_views && vkDestroyImageView) {
+    if (sc->image_views) {
         for (uint32_t i = 0; i < sc->image_count; i++) {
             if (sc->image_views[i] != VK_NULL_HANDLE) {
                 vkDestroyImageView(r->device, sc->image_views[i], NULL);
-                sc->image_views[i] = VK_NULL_HANDLE;
             }
         }
         free(sc->image_views);
         sc->image_views = NULL;
     }
 
-    if (sc->cmd_pool != VK_NULL_HANDLE && vkDestroyCommandPool) {
+    if (sc->cmd_pool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(r->device, sc->cmd_pool, NULL);
         sc->cmd_pool = VK_NULL_HANDLE;
     }
@@ -376,39 +373,32 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
         sc->cmds[i] = VK_NULL_HANDLE;
     }
 
-    if (sc->sem_render_finished && vkDestroySemaphore) {
+    if (sc->sem_render_finished) {
         for (uint32_t i = 0; i < sc->image_count; i++) {
             if (sc->sem_render_finished[i] != VK_NULL_HANDLE) {
                 vkDestroySemaphore(r->device, sc->sem_render_finished[i], NULL);
-                sc->sem_render_finished[i] = VK_NULL_HANDLE;
             }
         }
         free(sc->sem_render_finished);
         sc->sem_render_finished = NULL;
     }
 
-    if (vkDestroySemaphore) {
-        for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
-            if (sc->sem_image_available[i] != VK_NULL_HANDLE) {
-                vkDestroySemaphore(r->device, sc->sem_image_available[i], NULL);
-                sc->sem_image_available[i] = VK_NULL_HANDLE;
-            }
+    for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+        if (sc->sem_image_available[i] != VK_NULL_HANDLE) {
+            vkDestroySemaphore(r->device, sc->sem_image_available[i], NULL);
         }
     }
 
-    if (vkDestroyFence) {
-        for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
-            if (sc->fences_in_flight[i] != VK_NULL_HANDLE) {
-                vkDestroyFence(r->device, sc->fences_in_flight[i], NULL);
-                sc->fences_in_flight[i] = VK_NULL_HANDLE;
-            }
+    for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+        if (sc->fences_in_flight[i] != VK_NULL_HANDLE) {
+            vkDestroyFence(r->device, sc->fences_in_flight[i], NULL);
         }
     }
 
     free(sc->images_in_flight);
     sc->images_in_flight = NULL;
 
-    if (sc->swapchain != VK_NULL_HANDLE && vkDestroySwapchainKHR) {
+    if (sc->swapchain != VK_NULL_HANDLE) {
         vkDestroySwapchainKHR(r->device, sc->swapchain, NULL);
         sc->swapchain = VK_NULL_HANDLE;
     }
@@ -819,15 +809,15 @@ static void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
     /* Image slots alias `buffer` with `image` in the union; free them as images
      * (this also releases the imageView, which the buffer path would leak). */
     if (slot->usage & (NE_BUFFER_USAGE_IMAGE_STORAGE | NE_BUFFER_USAGE_IMAGE_SAMPLED)) {
-        if (slot->image != VK_NULL_HANDLE && vkDestroyImage) {
+        if (slot->image != VK_NULL_HANDLE) {
             vkDestroyImage(r->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
         }
-        if (slot->imageView != VK_NULL_HANDLE && vkDestroyImageView) {
+        if (slot->imageView != VK_NULL_HANDLE) {
             vkDestroyImageView(r->device, slot->imageView, NULL);
             slot->imageView = VK_NULL_HANDLE;
         }
-        if (slot->memory != VK_NULL_HANDLE && vkFreeMemory) {
+        if (slot->memory != VK_NULL_HANDLE) {
             vkFreeMemory(r->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
         }
@@ -840,11 +830,11 @@ static void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
                 vkUnmapMemory(r->device, slot->dyn_memories[i]);
                 slot->dyn_mapped[i] = NULL;
             }
-            if (slot->dyn_buffers[i] != VK_NULL_HANDLE && vkDestroyBuffer) {
+            if (slot->dyn_buffers[i] != VK_NULL_HANDLE) {
                 vkDestroyBuffer(r->device, slot->dyn_buffers[i], NULL);
                 slot->dyn_buffers[i] = VK_NULL_HANDLE;
             }
-            if (slot->dyn_memories[i] != VK_NULL_HANDLE && vkFreeMemory) {
+            if (slot->dyn_memories[i] != VK_NULL_HANDLE) {
                 vkFreeMemory(r->device, slot->dyn_memories[i], NULL);
                 slot->dyn_memories[i] = VK_NULL_HANDLE;
             }
@@ -852,11 +842,11 @@ static void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
         return;
     }
 
-    if (slot->buffer != VK_NULL_HANDLE && vkDestroyBuffer) {
+    if (slot->buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(r->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
     }
-    if (slot->memory != VK_NULL_HANDLE && vkFreeMemory) {
+    if (slot->memory != VK_NULL_HANDLE) {
         vkFreeMemory(r->device, slot->memory, NULL);
         slot->memory = VK_NULL_HANDLE;
     }
@@ -884,11 +874,11 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
         vkUnmapMemory(r->device, r->staging_memory);
         r->staging_mapped = NULL;
     }
-    if (r->staging_buffer != VK_NULL_HANDLE && vkDestroyBuffer) {
+    if (r->staging_buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
     }
-    if (r->staging_memory != VK_NULL_HANDLE && vkFreeMemory) {
+    if (r->staging_memory != VK_NULL_HANDLE) {
         vkFreeMemory(r->device, r->staging_memory, NULL);
         r->staging_memory = VK_NULL_HANDLE;
     }
@@ -1465,7 +1455,7 @@ void ne_renderer_destroy(NERenderer *r) {
     }
 
     /* Drain the GPU before tearing down any resources. */
-    if (r->device != VK_NULL_HANDLE && vkDeviceWaitIdle) {
+    if (r->device != VK_NULL_HANDLE) {
         (void)vkDeviceWaitIdle(r->device);
     }
 
@@ -1476,12 +1466,12 @@ void ne_renderer_destroy(NERenderer *r) {
 
         ne_vk_swapchain_cleanup(r, &s->sc);
 
-        if (s->render_pass != VK_NULL_HANDLE && vkDestroyRenderPass) {
+        if (s->render_pass != VK_NULL_HANDLE) {
             vkDestroyRenderPass(r->device, s->render_pass, NULL);
             s->render_pass = VK_NULL_HANDLE;
         }
 
-        if (s->surface != VK_NULL_HANDLE && vkDestroySurfaceKHR) {
+        if (s->surface != VK_NULL_HANDLE) {
             vkDestroySurfaceKHR(r->instance, s->surface, NULL);
             s->surface = VK_NULL_HANDLE;
         }
@@ -1507,7 +1497,7 @@ void ne_renderer_destroy(NERenderer *r) {
     for (uint32_t i = 0; i < r->shaders.cap; i++) {
         NEVulkanShaderSlot *sslot = &((NEVulkanShaderSlot*)r->shaders.slots)[i];
         if (sslot->occupied) {
-            if (sslot->module != VK_NULL_HANDLE && vkDestroyShaderModule) {
+            if (sslot->module != VK_NULL_HANDLE) {
                 vkDestroyShaderModule(r->device, sslot->module, NULL);
             }
             free(sslot->entry_point);
@@ -1519,10 +1509,10 @@ void ne_renderer_destroy(NERenderer *r) {
     for (uint32_t i = 0; i < r->pipelines.cap; i++) {
         NEVulkanPipelineSlot *pslot = &((NEVulkanPipelineSlot*)r->pipelines.slots)[i];
         if (pslot->occupied) {
-            if (pslot->pipeline != VK_NULL_HANDLE && vkDestroyPipeline) {
+            if (pslot->pipeline != VK_NULL_HANDLE) {
                 vkDestroyPipeline(r->device, pslot->pipeline, NULL);
             }
-            if (pslot->layout != VK_NULL_HANDLE && vkDestroyPipelineLayout) {
+            if (pslot->layout != VK_NULL_HANDLE) {
                 vkDestroyPipelineLayout(r->device, pslot->layout, NULL);
             }
             free(pslot->vert_entry);
@@ -1534,28 +1524,28 @@ void ne_renderer_destroy(NERenderer *r) {
     ne_pool_destroy(&r->pipelines);
 
     /* Destroy staging buffer and transfer command pool. */
-    if (r->staging_buffer != VK_NULL_HANDLE && vkDestroyBuffer) {
+    if (r->staging_buffer != VK_NULL_HANDLE) {
         vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
     }
-    if (r->staging_memory != VK_NULL_HANDLE && vkFreeMemory) {
+    if (r->staging_memory != VK_NULL_HANDLE) {
         vkFreeMemory(r->device, r->staging_memory, NULL);
         r->staging_memory = VK_NULL_HANDLE;
     }
     r->staging_mapped = NULL;
     r->staging_size = 0;
 
-    if (r->transfer_fence != VK_NULL_HANDLE && vkDestroyFence) {
+    if (r->transfer_fence != VK_NULL_HANDLE) {
         vkDestroyFence(r->device, r->transfer_fence, NULL);
         r->transfer_fence = VK_NULL_HANDLE;
     }
-    if (r->transfer_cmd_pool != VK_NULL_HANDLE && vkDestroyCommandPool) {
+    if (r->transfer_cmd_pool != VK_NULL_HANDLE) {
         vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
         r->transfer_cmd_pool = VK_NULL_HANDLE;
     }
     r->transfer_cmd = VK_NULL_HANDLE;
 
-    if (r->device != VK_NULL_HANDLE && vkDestroyDevice) {
+    if (r->device != VK_NULL_HANDLE) {
         vkDestroyDevice(r->device, NULL);
         r->device = VK_NULL_HANDLE;
         r->queue = VK_NULL_HANDLE;
@@ -1563,7 +1553,7 @@ void ne_renderer_destroy(NERenderer *r) {
         r->queue_family_index = 0;
     }
 
-    if (r->instance != VK_NULL_HANDLE && vkDestroyInstance) {
+    if (r->instance != VK_NULL_HANDLE) {
         vkDestroyInstance(r->instance, NULL);
         r->instance = VK_NULL_HANDLE;
     }
@@ -2646,17 +2636,17 @@ void ne_image_destroy(NERenderer *renderer, NEImageHandle handle) {
         return;
     }
 
-    if (slot->image != VK_NULL_HANDLE && vkDestroyImage) {
+    if (slot->image != VK_NULL_HANDLE) {
         vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
     }
 
-    if (slot->imageView != VK_NULL_HANDLE && vkDestroyImageView) {
+    if (slot->imageView != VK_NULL_HANDLE) {
         vkDestroyImageView(renderer->device, slot->imageView, NULL);
         slot->imageView = VK_NULL_HANDLE;
     }
 
-    if (slot->memory != VK_NULL_HANDLE && vkFreeMemory) {
+    if (slot->memory != VK_NULL_HANDLE) {
         vkFreeMemory(renderer->device, slot->memory, NULL);
         slot->memory = VK_NULL_HANDLE;
     }
@@ -3264,25 +3254,25 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index];
 
     /* Ensure the GPU is done with any command buffers referencing this pipeline. */
-    if (renderer->device != VK_NULL_HANDLE && vkDeviceWaitIdle) {
+    if (renderer->device != VK_NULL_HANDLE) {
         (void)vkDeviceWaitIdle(renderer->device);
     }
 
-    if (slot->pipeline != VK_NULL_HANDLE && vkDestroyPipeline) {
+    if (slot->pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(renderer->device, slot->pipeline, NULL);
         slot->pipeline = VK_NULL_HANDLE;
     }
 
-    if (slot->layout != VK_NULL_HANDLE && vkDestroyPipelineLayout) {
+    if (slot->layout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(renderer->device, slot->layout, NULL);
         slot->layout = VK_NULL_HANDLE;
     }
 
-    if (slot->vert_module != VK_NULL_HANDLE && vkDestroyShaderModule) {
+    if (slot->vert_module != VK_NULL_HANDLE) {
         vkDestroyShaderModule(renderer->device, slot->vert_module, NULL);
         slot->vert_module = VK_NULL_HANDLE;
     }
-    if (slot->frag_module != VK_NULL_HANDLE && vkDestroyShaderModule) {
+    if (slot->frag_module != VK_NULL_HANDLE) {
         vkDestroyShaderModule(renderer->device, slot->frag_module, NULL);
         slot->frag_module = VK_NULL_HANDLE;
     }
