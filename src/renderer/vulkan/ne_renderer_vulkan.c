@@ -292,6 +292,8 @@ struct NERenderPass {
     NERenderSurface *surface;
     VkCommandBuffer cmd;
     VkPipelineLayout bound_layout;
+    VkRenderPass render_pass;
+    uint32_t frame_index;
 };
 
 struct NERenderSurface {
@@ -1808,6 +1810,8 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     surface->pass.surface      = surface;
     surface->pass.cmd          = cmd;
     surface->pass.bound_layout = VK_NULL_HANDLE;
+    surface->pass.render_pass  = surface->render_pass;
+    surface->pass.frame_index  = surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
     return &surface->pass;
 }
 
@@ -1833,6 +1837,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
         pass->surface      = NULL;
         pass->cmd          = VK_NULL_HANDLE;
         pass->bound_layout = VK_NULL_HANDLE;
+        pass->render_pass  = VK_NULL_HANDLE;
         surface->wants_swapchain_recreate = true;
         return;
     }
@@ -1886,6 +1891,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     pass->surface      = NULL;
     pass->cmd          = VK_NULL_HANDLE;
     pass->bound_layout = VK_NULL_HANDLE;
+    pass->render_pass  = VK_NULL_HANDLE;
 }
 
 
@@ -3417,7 +3423,7 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
 
     /* Deferred compilation: build the VkPipeline on first use. */
     if (slot->needs_compile) {
-        if (!ne_vk_pipeline_compile(r, slot, pass->surface->render_pass)) {
+        if (!ne_vk_pipeline_compile(r, slot, pass->render_pass)) {
             /* compilation_failed is already set inside ne_vk_pipeline_compile. */
             return;
         }
@@ -3449,7 +3455,7 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
         return;
     }
 
-    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->surface->sc.frame_index);
+    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->frame_index);
     VkDeviceSize offset = 0;
 
     vkCmdBindVertexBuffers(pass->cmd, slot, 1, &vk_buffer, &offset);
@@ -3472,7 +3478,7 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
         return;
     }
 
-    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->surface->sc.frame_index);
+    VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->frame_index);
     VkIndexType vk_type = (type == NE_INDEX_TYPE_UINT32) ? VK_INDEX_TYPE_UINT32
                                                          : VK_INDEX_TYPE_UINT16;
 
@@ -3551,7 +3557,7 @@ void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
      * GPU has finished the copy at this frame index, so the write neither stalls
      * nor races. Memory is host-coherent, so no explicit flush is needed.
      */
-    const uint32_t frame = pass->surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
+    const uint32_t frame = pass->frame_index;
     if (slot->dyn_mapped[frame]) {
         memcpy((uint8_t *)slot->dyn_mapped[frame] + offset, data, size);
     }
