@@ -326,117 +326,6 @@ static void *ne_vk_get_device(VkDevice device, const char *name) {
     return (void *)vkGetDeviceProcAddr(device, name);
 }
 
-static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
-    if (!r || !sc) {
-        return;
-    }
-
-    if (sc->framebuffers) {
-        for (uint32_t i = 0; i < sc->image_count; i++) {
-            if (sc->framebuffers[i] != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
-            }
-        }
-        free(sc->framebuffers);
-        sc->framebuffers = NULL;
-    }
-
-    if (sc->image_views) {
-        for (uint32_t i = 0; i < sc->image_count; i++) {
-            if (sc->image_views[i] != VK_NULL_HANDLE) {
-                vkDestroyImageView(r->device, sc->image_views[i], NULL);
-            }
-        }
-        free(sc->image_views);
-        sc->image_views = NULL;
-    }
-
-    if (sc->sem_render_finished) {
-        for (uint32_t i = 0; i < sc->image_count; i++) {
-            if (sc->sem_render_finished[i] != VK_NULL_HANDLE) {
-                vkDestroySemaphore(r->device, sc->sem_render_finished[i], NULL);
-            }
-        }
-        free(sc->sem_render_finished);
-        sc->sem_render_finished = NULL;
-    }
-
-    free(sc->images_in_flight);
-    sc->images_in_flight = NULL;
-
-    if (sc->swapchain != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(r->device, sc->swapchain, NULL);
-        sc->swapchain = VK_NULL_HANDLE;
-    }
-
-    free(sc->images);
-    sc->images = NULL;
-    sc->image_count = 0;
-
-    sc->format = VK_FORMAT_UNDEFINED;
-    sc->color_space = (VkColorSpaceKHR)0;
-    sc->extent.width = 0;
-    sc->extent.height = 0;
-    sc->acquired_image_index = 0;
-}
-
-static bool ne_vk_surface_init_sync(NERenderSurface *surface) {
-    NERenderer *r = surface->renderer;
-
-    VkCommandPoolCreateInfo cpci;
-    memset(&cpci, 0, sizeof(cpci));
-    cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
-    cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
-    cpci.queueFamilyIndex = r->queue_family_index;
-
-    VkResult vr = vkCreateCommandPool(r->device, &cpci, NULL, &surface->cmd_pool);
-    if (vr != VK_SUCCESS || surface->cmd_pool == VK_NULL_HANDLE) {
-        NE_LOG_ERROR("vkCreateCommandPool failed (vr=%d)", (int)vr);
-        return false;
-    }
-
-    VkCommandBufferAllocateInfo cbai;
-    memset(&cbai, 0, sizeof(cbai));
-    cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
-    cbai.commandPool = surface->cmd_pool;
-    cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-    cbai.commandBufferCount = NE_VK_MAX_FRAMES_IN_FLIGHT;
-
-    vr = vkAllocateCommandBuffers(r->device, &cbai, surface->cmds);
-    if (vr != VK_SUCCESS) {
-        NE_LOG_ERROR("vkAllocateCommandBuffers failed (vr=%d)", (int)vr);
-        return false;
-    }
-
-    VkSemaphoreCreateInfo sci_sem;
-    memset(&sci_sem, 0, sizeof(sci_sem));
-    sci_sem.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
-        vr = vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sem_image_available[i]);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_ERROR("vkCreateSemaphore(image_available[%u]) failed (vr=%d)", (unsigned)i, (int)vr);
-            return false;
-        }
-    }
-
-    VkFenceCreateInfo fci;
-    memset(&fci, 0, sizeof(fci));
-    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-    fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-
-    for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
-        vr = vkCreateFence(r->device, &fci, NULL, &surface->fences_in_flight[i]);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_ERROR("vkCreateFence[%u] failed (vr=%d)", (unsigned)i, (int)vr);
-            return false;
-        }
-    }
-
-    surface->frame_index = 0;
-    return true;
-}
-
 static bool ne_vk_load_loader(NERenderer *renderer) {
     renderer->vulkan_lib = LoadLibraryA("vulkan-1.dll");
     if (!renderer->vulkan_lib) {
@@ -744,6 +633,136 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
         return false;
     }
 
+    return true;
+}
+
+static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
+    if (!r || !sc) {
+        return;
+    }
+
+    if (sc->framebuffers) {
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            if (sc->framebuffers[i] != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
+            }
+        }
+        free(sc->framebuffers);
+        sc->framebuffers = NULL;
+    }
+
+    if (sc->image_views) {
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            if (sc->image_views[i] != VK_NULL_HANDLE) {
+                vkDestroyImageView(r->device, sc->image_views[i], NULL);
+            }
+        }
+        free(sc->image_views);
+        sc->image_views = NULL;
+    }
+
+    if (sc->sem_render_finished) {
+        for (uint32_t i = 0; i < sc->image_count; i++) {
+            if (sc->sem_render_finished[i] != VK_NULL_HANDLE) {
+                vkDestroySemaphore(r->device, sc->sem_render_finished[i], NULL);
+            }
+        }
+        free(sc->sem_render_finished);
+        sc->sem_render_finished = NULL;
+    }
+
+    free(sc->images_in_flight);
+    sc->images_in_flight = NULL;
+
+    if (sc->swapchain != VK_NULL_HANDLE) {
+        vkDestroySwapchainKHR(r->device, sc->swapchain, NULL);
+        sc->swapchain = VK_NULL_HANDLE;
+    }
+
+    free(sc->images);
+    sc->images = NULL;
+    sc->image_count = 0;
+
+    sc->format = VK_FORMAT_UNDEFINED;
+    sc->color_space = (VkColorSpaceKHR)0;
+    sc->extent.width = 0;
+    sc->extent.height = 0;
+    sc->acquired_image_index = 0;
+}
+
+static bool ne_vk_surface_init(NERenderSurface *surface, NERenderer *r,
+                               NEWindow *window, VkSurfaceKHR vk_surface,
+                               const NERenderSurfaceDesc *desc) {
+    surface->renderer = r;
+    surface->window = window;
+    surface->surface = vk_surface;
+    surface->wants_swapchain_recreate = true;
+    surface->vsync = true;
+
+    surface->clear_color[0] = 0.1f;
+    surface->clear_color[1] = 0.1f;
+    surface->clear_color[2] = 0.2f;
+    surface->clear_color[3] = 1.0f;
+    if (desc) {
+        surface->vsync = desc->vsync;
+        memcpy(surface->clear_color, desc->clear_color_rgba, sizeof(surface->clear_color));
+    }
+
+    if (!ne_vk_pick_device_and_queue(r, vk_surface)) {
+        return false;
+    }
+
+    VkCommandPoolCreateInfo cpci;
+    memset(&cpci, 0, sizeof(cpci));
+    cpci.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+    cpci.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+    cpci.queueFamilyIndex = r->queue_family_index;
+
+    VkResult vr = vkCreateCommandPool(r->device, &cpci, NULL, &surface->cmd_pool);
+    if (vr != VK_SUCCESS || surface->cmd_pool == VK_NULL_HANDLE) {
+        NE_LOG_ERROR("vkCreateCommandPool failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    VkCommandBufferAllocateInfo cbai;
+    memset(&cbai, 0, sizeof(cbai));
+    cbai.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+    cbai.commandPool = surface->cmd_pool;
+    cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+    cbai.commandBufferCount = NE_VK_MAX_FRAMES_IN_FLIGHT;
+
+    vr = vkAllocateCommandBuffers(r->device, &cbai, surface->cmds);
+    if (vr != VK_SUCCESS) {
+        NE_LOG_ERROR("vkAllocateCommandBuffers failed (vr=%d)", (int)vr);
+        return false;
+    }
+
+    VkSemaphoreCreateInfo sci_sem;
+    memset(&sci_sem, 0, sizeof(sci_sem));
+    sci_sem.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+
+    for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+        vr = vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sem_image_available[i]);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkCreateSemaphore(image_available[%u]) failed (vr=%d)", (unsigned)i, (int)vr);
+            return false;
+        }
+    }
+
+    VkFenceCreateInfo fci;
+    memset(&fci, 0, sizeof(fci));
+    fci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+    fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+
+    for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
+        vr = vkCreateFence(r->device, &fci, NULL, &surface->fences_in_flight[i]);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkCreateFence[%u] failed (vr=%d)", (unsigned)i, (int)vr);
+            return false;
+        }
+    }
+
+    surface->frame_index = 0;
     return true;
 }
 
@@ -1668,29 +1687,7 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
         return NULL;
     }
 
-    surface->renderer = r;
-    surface->window = window;
-    surface->surface = vk_surface;
-    surface->wants_swapchain_recreate = true;
-    surface->vsync = true;
-
-    surface->clear_color[0] = 0.1f;
-    surface->clear_color[1] = 0.1f;
-    surface->clear_color[2] = 0.2f;
-    surface->clear_color[3] = 1.0f;
-    if (desc) {
-        surface->vsync = desc->vsync;
-        memcpy(surface->clear_color, desc->clear_color_rgba, sizeof(surface->clear_color));
-    }
-
-    /* Device creation is delayed until we have a surface (for present support checks). */
-    if (!ne_vk_pick_device_and_queue(r, surface->surface)) {
-        ne_renderer_destroy_surface(r, surface);
-        return NULL;
-    }
-
-    /* Create command/sync infrastructure (surface-lifetime, survives swapchain recreates). */
-    if (!ne_vk_surface_init_sync(surface)) {
+    if (!ne_vk_surface_init(surface, r, window, vk_surface, desc)) {
         ne_renderer_destroy_surface(r, surface);
         return NULL;
     }
