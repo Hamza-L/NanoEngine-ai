@@ -39,117 +39,115 @@
  * 5) Clear + present (no pipelines, no render pass yet)
  */
 
-typedef struct NEVulkanFns {
-    /* Global */
-    PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
-    PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
+/* Global */
+static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+static PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
 
-    PFN_vkCreateInstance vkCreateInstance;
-    PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
-    PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties;
+static PFN_vkCreateInstance vkCreateInstance;
+static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
+static PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties;
 
-    /* Instance */
-    PFN_vkDestroyInstance vkDestroyInstance;
-    PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
-    PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
-    PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
+/* Instance */
+static PFN_vkDestroyInstance vkDestroyInstance;
+static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
+static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
+static PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
 
-    PFN_vkCreateDevice vkCreateDevice;
+static PFN_vkCreateDevice vkCreateDevice;
 
-    PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
-    PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
-    PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
-    PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
+static PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
+static PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+static PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
+static PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
 
-    PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
-    PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+static PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
+static PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
 
-    /* Device */
-    PFN_vkDestroyDevice vkDestroyDevice;
-    PFN_vkGetDeviceQueue vkGetDeviceQueue;
-    PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
+/* Device */
+static PFN_vkDestroyDevice vkDestroyDevice;
+static PFN_vkGetDeviceQueue vkGetDeviceQueue;
+static PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
 
-    PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
-    PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
-    PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
-    PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+static PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
+static PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+static PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
+static PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
 
-    PFN_vkQueueSubmit vkQueueSubmit;
-    PFN_vkQueuePresentKHR vkQueuePresentKHR;
-    PFN_vkQueueWaitIdle vkQueueWaitIdle;
+static PFN_vkQueueSubmit vkQueueSubmit;
+static PFN_vkQueuePresentKHR vkQueuePresentKHR;
+static PFN_vkQueueWaitIdle vkQueueWaitIdle;
 
-    PFN_vkCreateSemaphore vkCreateSemaphore;
-    PFN_vkDestroySemaphore vkDestroySemaphore;
-    PFN_vkCreateFence vkCreateFence;
-    PFN_vkDestroyFence vkDestroyFence;
-    PFN_vkWaitForFences vkWaitForFences;
-    PFN_vkResetFences vkResetFences;
+static PFN_vkCreateSemaphore vkCreateSemaphore;
+static PFN_vkDestroySemaphore vkDestroySemaphore;
+static PFN_vkCreateFence vkCreateFence;
+static PFN_vkDestroyFence vkDestroyFence;
+static PFN_vkWaitForFences vkWaitForFences;
+static PFN_vkResetFences vkResetFences;
 
-    PFN_vkCreateCommandPool vkCreateCommandPool;
-    PFN_vkDestroyCommandPool vkDestroyCommandPool;
-    PFN_vkResetCommandPool vkResetCommandPool;
-    PFN_vkResetCommandBuffer vkResetCommandBuffer;
-    PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
-    PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
+static PFN_vkCreateCommandPool vkCreateCommandPool;
+static PFN_vkDestroyCommandPool vkDestroyCommandPool;
+static PFN_vkResetCommandPool vkResetCommandPool;
+static PFN_vkResetCommandBuffer vkResetCommandBuffer;
+static PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
+static PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
 
-    PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
-    PFN_vkEndCommandBuffer vkEndCommandBuffer;
-    PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
-    PFN_vkCmdClearColorImage vkCmdClearColorImage;
+static PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
+static PFN_vkEndCommandBuffer vkEndCommandBuffer;
+static PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
+static PFN_vkCmdClearColorImage vkCmdClearColorImage;
 
-    /* Buffer management */
-    PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
-    PFN_vkCreateBuffer vkCreateBuffer;
-    PFN_vkDestroyBuffer vkDestroyBuffer;
-    PFN_vkCreateImage vkCreateImage;
-    PFN_vkDestroyImage vkDestroyImage;
-    PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
-    PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
-    PFN_vkAllocateMemory vkAllocateMemory;
-    PFN_vkFreeMemory vkFreeMemory;
-    PFN_vkBindBufferMemory vkBindBufferMemory;
-    PFN_vkBindImageMemory vkBindImageMemory;
-    PFN_vkMapMemory vkMapMemory;
-    PFN_vkUnmapMemory vkUnmapMemory;
-    PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
-    PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
-    PFN_vkCmdCopyImage vkCmdCopyImage;
-    PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
+/* Buffer management */
+static PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+static PFN_vkCreateBuffer vkCreateBuffer;
+static PFN_vkDestroyBuffer vkDestroyBuffer;
+static PFN_vkCreateImage vkCreateImage;
+static PFN_vkDestroyImage vkDestroyImage;
+static PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
+static PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
+static PFN_vkAllocateMemory vkAllocateMemory;
+static PFN_vkFreeMemory vkFreeMemory;
+static PFN_vkBindBufferMemory vkBindBufferMemory;
+static PFN_vkBindImageMemory vkBindImageMemory;
+static PFN_vkMapMemory vkMapMemory;
+static PFN_vkUnmapMemory vkUnmapMemory;
+static PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
+static PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
+static PFN_vkCmdCopyImage vkCmdCopyImage;
+static PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
 
-    /* Shader management */
-    PFN_vkCreateShaderModule vkCreateShaderModule;
-    PFN_vkDestroyShaderModule vkDestroyShaderModule;
+/* Shader management */
+static PFN_vkCreateShaderModule vkCreateShaderModule;
+static PFN_vkDestroyShaderModule vkDestroyShaderModule;
 
-    /* Render pass */
-    PFN_vkCreateRenderPass vkCreateRenderPass;
-    PFN_vkDestroyRenderPass vkDestroyRenderPass;
+/* Render pass */
+static PFN_vkCreateRenderPass vkCreateRenderPass;
+static PFN_vkDestroyRenderPass vkDestroyRenderPass;
 
-    /* Image views */
-    PFN_vkCreateImageView vkCreateImageView;
-    PFN_vkDestroyImageView vkDestroyImageView;
+/* Image views */
+static PFN_vkCreateImageView vkCreateImageView;
+static PFN_vkDestroyImageView vkDestroyImageView;
 
-    /* Framebuffers */
-    PFN_vkCreateFramebuffer vkCreateFramebuffer;
-    PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
+/* Framebuffers */
+static PFN_vkCreateFramebuffer vkCreateFramebuffer;
+static PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
 
-    /* Pipeline */
-    PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
-    PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
-    PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
-    PFN_vkDestroyPipeline vkDestroyPipeline;
+/* Pipeline */
+static PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
+static PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
+static PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
+static PFN_vkDestroyPipeline vkDestroyPipeline;
 
-    /* Render pass commands */
-    PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
-    PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
-    PFN_vkCmdBindPipeline vkCmdBindPipeline;
-    PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers;
-    PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
-    PFN_vkCmdSetViewport vkCmdSetViewport;
-    PFN_vkCmdSetScissor vkCmdSetScissor;
-    PFN_vkCmdDraw vkCmdDraw;
-    PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
-    PFN_vkCmdPushConstants vkCmdPushConstants;
-} NEVulkanFunctions;
+/* Render pass commands */
+static PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
+static PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
+static PFN_vkCmdBindPipeline vkCmdBindPipeline;
+static PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers;
+static PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
+static PFN_vkCmdSetViewport vkCmdSetViewport;
+static PFN_vkCmdSetScissor vkCmdSetScissor;
+static PFN_vkCmdDraw vkCmdDraw;
+static PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
+static PFN_vkCmdPushConstants vkCmdPushConstants;
 
 enum {
     NE_VK_MAX_FRAMES_IN_FLIGHT = 2,
@@ -281,8 +279,6 @@ struct NERenderer {
     VkQueue queue;
     uint32_t queue_family_index;
 
-    NEVulkanFunctions fns;
-
     NEPool buffers;
     NEPool shaders;
     NEPool pipelines;
@@ -338,25 +334,25 @@ static NERenderPass g_active_pass = {0};
 
 static NERenderer *g_renderer_singleton = NULL;
 
-static void *ne_vk_get_global(const NEVulkanFunctions *fns, const char *name) {
-    if (!fns || !fns->vkGetInstanceProcAddr) {
+static void *ne_vk_get_global(const char *name) {
+    if (!vkGetInstanceProcAddr) {
         return NULL;
     }
-    return (void *)fns->vkGetInstanceProcAddr(VK_NULL_HANDLE, name);
+    return (void *)vkGetInstanceProcAddr(VK_NULL_HANDLE, name);
 }
 
-static void *ne_vk_get_instance(const NEVulkanFunctions *fns, VkInstance instance, const char *name) {
-    if (!fns || !fns->vkGetInstanceProcAddr) {
+static void *ne_vk_get_instance(VkInstance instance, const char *name) {
+    if (!vkGetInstanceProcAddr) {
         return NULL;
     }
-    return (void *)fns->vkGetInstanceProcAddr(instance, name);
+    return (void *)vkGetInstanceProcAddr(instance, name);
 }
 
-static void *ne_vk_get_device(const NEVulkanFunctions *fns, VkDevice device, const char *name) {
-    if (!fns || !fns->vkGetDeviceProcAddr) {
+static void *ne_vk_get_device(VkDevice device, const char *name) {
+    if (!vkGetDeviceProcAddr) {
         return NULL;
     }
-    return (void *)fns->vkGetDeviceProcAddr(device, name);
+    return (void *)vkGetDeviceProcAddr(device, name);
 }
 
 static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
@@ -364,15 +360,15 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
         return;
     }
 
-    if (r->device != VK_NULL_HANDLE && r->fns.vkDeviceWaitIdle) {
-        (void)r->fns.vkDeviceWaitIdle(r->device);
+    if (r->device != VK_NULL_HANDLE && vkDeviceWaitIdle) {
+        (void)vkDeviceWaitIdle(r->device);
     }
 
     /* Destroy framebuffers before image views (framebuffers reference views). */
-    if (sc->framebuffers && r->fns.vkDestroyFramebuffer) {
+    if (sc->framebuffers && vkDestroyFramebuffer) {
         for (uint32_t i = 0; i < sc->image_count; i++) {
             if (sc->framebuffers[i] != VK_NULL_HANDLE) {
-                r->fns.vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
+                vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
                 sc->framebuffers[i] = VK_NULL_HANDLE;
             }
         }
@@ -380,10 +376,10 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
         sc->framebuffers = NULL;
     }
 
-    if (sc->image_views && r->fns.vkDestroyImageView) {
+    if (sc->image_views && vkDestroyImageView) {
         for (uint32_t i = 0; i < sc->image_count; i++) {
             if (sc->image_views[i] != VK_NULL_HANDLE) {
-                r->fns.vkDestroyImageView(r->device, sc->image_views[i], NULL);
+                vkDestroyImageView(r->device, sc->image_views[i], NULL);
                 sc->image_views[i] = VK_NULL_HANDLE;
             }
         }
@@ -391,18 +387,18 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
         sc->image_views = NULL;
     }
 
-    if (sc->cmd_pool != VK_NULL_HANDLE && r->fns.vkDestroyCommandPool) {
-        r->fns.vkDestroyCommandPool(r->device, sc->cmd_pool, NULL);
+    if (sc->cmd_pool != VK_NULL_HANDLE && vkDestroyCommandPool) {
+        vkDestroyCommandPool(r->device, sc->cmd_pool, NULL);
         sc->cmd_pool = VK_NULL_HANDLE;
     }
     for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
         sc->cmds[i] = VK_NULL_HANDLE;
     }
 
-    if (sc->sem_render_finished && r->fns.vkDestroySemaphore) {
+    if (sc->sem_render_finished && vkDestroySemaphore) {
         for (uint32_t i = 0; i < sc->image_count; i++) {
             if (sc->sem_render_finished[i] != VK_NULL_HANDLE) {
-                r->fns.vkDestroySemaphore(r->device, sc->sem_render_finished[i], NULL);
+                vkDestroySemaphore(r->device, sc->sem_render_finished[i], NULL);
                 sc->sem_render_finished[i] = VK_NULL_HANDLE;
             }
         }
@@ -410,19 +406,19 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
         sc->sem_render_finished = NULL;
     }
 
-    if (r->fns.vkDestroySemaphore) {
+    if (vkDestroySemaphore) {
         for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
             if (sc->sem_image_available[i] != VK_NULL_HANDLE) {
-                r->fns.vkDestroySemaphore(r->device, sc->sem_image_available[i], NULL);
+                vkDestroySemaphore(r->device, sc->sem_image_available[i], NULL);
                 sc->sem_image_available[i] = VK_NULL_HANDLE;
             }
         }
     }
 
-    if (r->fns.vkDestroyFence) {
+    if (vkDestroyFence) {
         for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
             if (sc->fences_in_flight[i] != VK_NULL_HANDLE) {
-                r->fns.vkDestroyFence(r->device, sc->fences_in_flight[i], NULL);
+                vkDestroyFence(r->device, sc->fences_in_flight[i], NULL);
                 sc->fences_in_flight[i] = VK_NULL_HANDLE;
             }
         }
@@ -431,8 +427,8 @@ static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
     free(sc->images_in_flight);
     sc->images_in_flight = NULL;
 
-    if (sc->swapchain != VK_NULL_HANDLE && r->fns.vkDestroySwapchainKHR) {
-        r->fns.vkDestroySwapchainKHR(r->device, sc->swapchain, NULL);
+    if (sc->swapchain != VK_NULL_HANDLE && vkDestroySwapchainKHR) {
+        vkDestroySwapchainKHR(r->device, sc->swapchain, NULL);
         sc->swapchain = VK_NULL_HANDLE;
     }
 
@@ -457,19 +453,19 @@ static bool ne_vk_load_loader(NERenderer *renderer) {
         return false;
     }
 
-    renderer->fns.vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetInstanceProcAddr");
-    renderer->fns.vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetDeviceProcAddr");
+    vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetInstanceProcAddr");
+    vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetDeviceProcAddr");
 
-    if (!renderer->fns.vkGetInstanceProcAddr || !renderer->fns.vkGetDeviceProcAddr) {
+    if (!vkGetInstanceProcAddr || !vkGetDeviceProcAddr) {
         NE_LOG_ERROR("failed to get Vulkan proc address functions");
         return false;
     }
 
-    renderer->fns.vkCreateInstance = (PFN_vkCreateInstance)ne_vk_get_global(&renderer->fns, "vkCreateInstance");
-    renderer->fns.vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)ne_vk_get_global(&renderer->fns, "vkEnumerateInstanceExtensionProperties");
-    renderer->fns.vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)ne_vk_get_global(&renderer->fns, "vkEnumerateInstanceLayerProperties");
+    vkCreateInstance = (PFN_vkCreateInstance)ne_vk_get_global("vkCreateInstance");
+    vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)ne_vk_get_global("vkEnumerateInstanceExtensionProperties");
+    vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)ne_vk_get_global("vkEnumerateInstanceLayerProperties");
 
-    if (!renderer->fns.vkCreateInstance || !renderer->fns.vkEnumerateInstanceExtensionProperties) {
+    if (!vkCreateInstance || !vkEnumerateInstanceExtensionProperties) {
         NE_LOG_ERROR("failed to load required Vulkan loader entry points");
         return false;
     }
@@ -478,132 +474,128 @@ static bool ne_vk_load_loader(NERenderer *renderer) {
 }
 
 static bool ne_vk_load_instance_fns(NERenderer *r) {
-    NEVulkanFunctions *f = &r->fns;
+    vkDestroyInstance = (PFN_vkDestroyInstance)ne_vk_get_instance(r->instance, "vkDestroyInstance");
+    vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)ne_vk_get_instance(r->instance, "vkEnumeratePhysicalDevices");
+    vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceProperties");
+    vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+    vkCreateDevice = (PFN_vkCreateDevice)ne_vk_get_instance(r->instance, "vkCreateDevice");
+    vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceMemoryProperties");
 
-    f->vkDestroyInstance = (PFN_vkDestroyInstance)ne_vk_get_instance(f, r->instance, "vkDestroyInstance");
-    f->vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)ne_vk_get_instance(f, r->instance, "vkEnumeratePhysicalDevices");
-    f->vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceProperties");
-    f->vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
-    f->vkCreateDevice = (PFN_vkCreateDevice)ne_vk_get_instance(f, r->instance, "vkCreateDevice");
-    f->vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceMemoryProperties");
+    vkCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)ne_vk_get_instance(r->instance, "vkCreateWin32SurfaceKHR");
+    vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)ne_vk_get_instance(r->instance, "vkDestroySurfaceKHR");
 
-    f->vkCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)ne_vk_get_instance(f, r->instance, "vkCreateWin32SurfaceKHR");
-    f->vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)ne_vk_get_instance(f, r->instance, "vkDestroySurfaceKHR");
+    vkGetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
+    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
+    vkGetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
+    vkGetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
 
-    f->vkGetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
-    f->vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
-    f->vkGetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
-    f->vkGetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)ne_vk_get_instance(f, r->instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
-
-    return f->vkDestroyInstance && f->vkEnumeratePhysicalDevices && f->vkGetPhysicalDeviceQueueFamilyProperties && f->vkCreateDevice &&
-           f->vkCreateWin32SurfaceKHR && f->vkDestroySurfaceKHR && f->vkGetPhysicalDeviceSurfaceSupportKHR &&
-           f->vkGetPhysicalDeviceSurfaceCapabilitiesKHR && f->vkGetPhysicalDeviceSurfaceFormatsKHR && f->vkGetPhysicalDeviceSurfacePresentModesKHR &&
-           f->vkGetPhysicalDeviceMemoryProperties;
+    return vkDestroyInstance && vkEnumeratePhysicalDevices && vkGetPhysicalDeviceQueueFamilyProperties && vkCreateDevice &&
+           vkCreateWin32SurfaceKHR && vkDestroySurfaceKHR && vkGetPhysicalDeviceSurfaceSupportKHR &&
+           vkGetPhysicalDeviceSurfaceCapabilitiesKHR && vkGetPhysicalDeviceSurfaceFormatsKHR && vkGetPhysicalDeviceSurfacePresentModesKHR &&
+           vkGetPhysicalDeviceMemoryProperties;
 }
 
 static bool ne_vk_load_device_fns(NERenderer *r) {
-    NEVulkanFunctions *f = &r->fns;
+    vkDestroyDevice = (PFN_vkDestroyDevice)ne_vk_get_device(r->device, "vkDestroyDevice");
+    vkGetDeviceQueue = (PFN_vkGetDeviceQueue)ne_vk_get_device(r->device, "vkGetDeviceQueue");
+    vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)ne_vk_get_device(r->device, "vkDeviceWaitIdle");
 
-    f->vkDestroyDevice = (PFN_vkDestroyDevice)ne_vk_get_device(f, r->device, "vkDestroyDevice");
-    f->vkGetDeviceQueue = (PFN_vkGetDeviceQueue)ne_vk_get_device(f, r->device, "vkGetDeviceQueue");
-    f->vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)ne_vk_get_device(f, r->device, "vkDeviceWaitIdle");
+    vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)ne_vk_get_device(r->device, "vkCreateSwapchainKHR");
+    vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)ne_vk_get_device(r->device, "vkDestroySwapchainKHR");
+    vkGetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR)ne_vk_get_device(r->device, "vkGetSwapchainImagesKHR");
+    vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)ne_vk_get_device(r->device, "vkAcquireNextImageKHR");
 
-    f->vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)ne_vk_get_device(f, r->device, "vkCreateSwapchainKHR");
-    f->vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)ne_vk_get_device(f, r->device, "vkDestroySwapchainKHR");
-    f->vkGetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR)ne_vk_get_device(f, r->device, "vkGetSwapchainImagesKHR");
-    f->vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)ne_vk_get_device(f, r->device, "vkAcquireNextImageKHR");
+    vkQueueSubmit = (PFN_vkQueueSubmit)ne_vk_get_device(r->device, "vkQueueSubmit");
+    vkQueuePresentKHR = (PFN_vkQueuePresentKHR)ne_vk_get_device(r->device, "vkQueuePresentKHR");
+    vkQueueWaitIdle = (PFN_vkQueueWaitIdle)ne_vk_get_device(r->device, "vkQueueWaitIdle");
 
-    f->vkQueueSubmit = (PFN_vkQueueSubmit)ne_vk_get_device(f, r->device, "vkQueueSubmit");
-    f->vkQueuePresentKHR = (PFN_vkQueuePresentKHR)ne_vk_get_device(f, r->device, "vkQueuePresentKHR");
-    f->vkQueueWaitIdle = (PFN_vkQueueWaitIdle)ne_vk_get_device(f, r->device, "vkQueueWaitIdle");
+    vkCreateSemaphore = (PFN_vkCreateSemaphore)ne_vk_get_device(r->device, "vkCreateSemaphore");
+    vkDestroySemaphore = (PFN_vkDestroySemaphore)ne_vk_get_device(r->device, "vkDestroySemaphore");
+    vkCreateFence = (PFN_vkCreateFence)ne_vk_get_device(r->device, "vkCreateFence");
+    vkDestroyFence = (PFN_vkDestroyFence)ne_vk_get_device(r->device, "vkDestroyFence");
+    vkWaitForFences = (PFN_vkWaitForFences)ne_vk_get_device(r->device, "vkWaitForFences");
+    vkResetFences = (PFN_vkResetFences)ne_vk_get_device(r->device, "vkResetFences");
 
-    f->vkCreateSemaphore = (PFN_vkCreateSemaphore)ne_vk_get_device(f, r->device, "vkCreateSemaphore");
-    f->vkDestroySemaphore = (PFN_vkDestroySemaphore)ne_vk_get_device(f, r->device, "vkDestroySemaphore");
-    f->vkCreateFence = (PFN_vkCreateFence)ne_vk_get_device(f, r->device, "vkCreateFence");
-    f->vkDestroyFence = (PFN_vkDestroyFence)ne_vk_get_device(f, r->device, "vkDestroyFence");
-    f->vkWaitForFences = (PFN_vkWaitForFences)ne_vk_get_device(f, r->device, "vkWaitForFences");
-    f->vkResetFences = (PFN_vkResetFences)ne_vk_get_device(f, r->device, "vkResetFences");
+    vkCreateCommandPool = (PFN_vkCreateCommandPool)ne_vk_get_device(r->device, "vkCreateCommandPool");
+    vkDestroyCommandPool = (PFN_vkDestroyCommandPool)ne_vk_get_device(r->device, "vkDestroyCommandPool");
+    vkResetCommandPool = (PFN_vkResetCommandPool)ne_vk_get_device(r->device, "vkResetCommandPool");
+    vkResetCommandBuffer = (PFN_vkResetCommandBuffer)ne_vk_get_device(r->device, "vkResetCommandBuffer");
+    vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)ne_vk_get_device(r->device, "vkAllocateCommandBuffers");
+    vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)ne_vk_get_device(r->device, "vkFreeCommandBuffers");
 
-    f->vkCreateCommandPool = (PFN_vkCreateCommandPool)ne_vk_get_device(f, r->device, "vkCreateCommandPool");
-    f->vkDestroyCommandPool = (PFN_vkDestroyCommandPool)ne_vk_get_device(f, r->device, "vkDestroyCommandPool");
-    f->vkResetCommandPool = (PFN_vkResetCommandPool)ne_vk_get_device(f, r->device, "vkResetCommandPool");
-    f->vkResetCommandBuffer = (PFN_vkResetCommandBuffer)ne_vk_get_device(f, r->device, "vkResetCommandBuffer");
-    f->vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)ne_vk_get_device(f, r->device, "vkAllocateCommandBuffers");
-    f->vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)ne_vk_get_device(f, r->device, "vkFreeCommandBuffers");
-
-    f->vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)ne_vk_get_device(f, r->device, "vkBeginCommandBuffer");
-    f->vkEndCommandBuffer = (PFN_vkEndCommandBuffer)ne_vk_get_device(f, r->device, "vkEndCommandBuffer");
-    f->vkCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)ne_vk_get_device(f, r->device, "vkCmdPipelineBarrier");
-    f->vkCmdClearColorImage = (PFN_vkCmdClearColorImage)ne_vk_get_device(f, r->device, "vkCmdClearColorImage");
+    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)ne_vk_get_device(r->device, "vkBeginCommandBuffer");
+    vkEndCommandBuffer = (PFN_vkEndCommandBuffer)ne_vk_get_device(r->device, "vkEndCommandBuffer");
+    vkCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)ne_vk_get_device(r->device, "vkCmdPipelineBarrier");
+    vkCmdClearColorImage = (PFN_vkCmdClearColorImage)ne_vk_get_device(r->device, "vkCmdClearColorImage");
 
     /* Buffer management functions */
-    f->vkCreateBuffer = (PFN_vkCreateBuffer)ne_vk_get_device(f, r->device, "vkCreateBuffer");
-    f->vkDestroyBuffer = (PFN_vkDestroyBuffer)ne_vk_get_device(f, r->device, "vkDestroyBuffer");
-    f->vkCreateImage = (PFN_vkCreateImage)ne_vk_get_device(f, r->device, "vkCreateImage");
-    f->vkDestroyImage = (PFN_vkDestroyImage)ne_vk_get_device(f, r->device, "vkDestroyImage");
-    f->vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)ne_vk_get_device(f, r->device, "vkGetBufferMemoryRequirements");
-    f->vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)ne_vk_get_device(f, r->device, "vkGetImageMemoryRequirements");
-    f->vkAllocateMemory = (PFN_vkAllocateMemory)ne_vk_get_device(f, r->device, "vkAllocateMemory");
-    f->vkFreeMemory = (PFN_vkFreeMemory)ne_vk_get_device(f, r->device, "vkFreeMemory");
-    f->vkBindBufferMemory = (PFN_vkBindBufferMemory)ne_vk_get_device(f, r->device, "vkBindBufferMemory");
-    f->vkBindImageMemory = (PFN_vkBindImageMemory)ne_vk_get_device(f, r->device, "vkBindImageMemory");
-    f->vkMapMemory = (PFN_vkMapMemory)ne_vk_get_device(f, r->device, "vkMapMemory");
-    f->vkUnmapMemory = (PFN_vkUnmapMemory)ne_vk_get_device(f, r->device, "vkUnmapMemory");
-    f->vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)ne_vk_get_device(f, r->device, "vkFlushMappedMemoryRanges");
-    f->vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)ne_vk_get_device(f, r->device, "vkCmdCopyBuffer");
-    f->vkCmdCopyImage = (PFN_vkCmdCopyImage)ne_vk_get_device(f, r->device, "vkCmdCopyImage");
-    f->vkCmdCopyBufferToImage = (PFN_vkCmdCopyBufferToImage)ne_vk_get_device(f, r->device, "vkCmdCopyBufferToImage");
+    vkCreateBuffer = (PFN_vkCreateBuffer)ne_vk_get_device(r->device, "vkCreateBuffer");
+    vkDestroyBuffer = (PFN_vkDestroyBuffer)ne_vk_get_device(r->device, "vkDestroyBuffer");
+    vkCreateImage = (PFN_vkCreateImage)ne_vk_get_device(r->device, "vkCreateImage");
+    vkDestroyImage = (PFN_vkDestroyImage)ne_vk_get_device(r->device, "vkDestroyImage");
+    vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)ne_vk_get_device(r->device, "vkGetBufferMemoryRequirements");
+    vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)ne_vk_get_device(r->device, "vkGetImageMemoryRequirements");
+    vkAllocateMemory = (PFN_vkAllocateMemory)ne_vk_get_device(r->device, "vkAllocateMemory");
+    vkFreeMemory = (PFN_vkFreeMemory)ne_vk_get_device(r->device, "vkFreeMemory");
+    vkBindBufferMemory = (PFN_vkBindBufferMemory)ne_vk_get_device(r->device, "vkBindBufferMemory");
+    vkBindImageMemory = (PFN_vkBindImageMemory)ne_vk_get_device(r->device, "vkBindImageMemory");
+    vkMapMemory = (PFN_vkMapMemory)ne_vk_get_device(r->device, "vkMapMemory");
+    vkUnmapMemory = (PFN_vkUnmapMemory)ne_vk_get_device(r->device, "vkUnmapMemory");
+    vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)ne_vk_get_device(r->device, "vkFlushMappedMemoryRanges");
+    vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)ne_vk_get_device(r->device, "vkCmdCopyBuffer");
+    vkCmdCopyImage = (PFN_vkCmdCopyImage)ne_vk_get_device(r->device, "vkCmdCopyImage");
+    vkCmdCopyBufferToImage = (PFN_vkCmdCopyBufferToImage)ne_vk_get_device(r->device, "vkCmdCopyBufferToImage");
 
     /* Shader management functions */
-    f->vkCreateShaderModule = (PFN_vkCreateShaderModule)ne_vk_get_device(f, r->device, "vkCreateShaderModule");
-    f->vkDestroyShaderModule = (PFN_vkDestroyShaderModule)ne_vk_get_device(f, r->device, "vkDestroyShaderModule");
+    vkCreateShaderModule = (PFN_vkCreateShaderModule)ne_vk_get_device(r->device, "vkCreateShaderModule");
+    vkDestroyShaderModule = (PFN_vkDestroyShaderModule)ne_vk_get_device(r->device, "vkDestroyShaderModule");
 
     /* Render pass */
-    f->vkCreateRenderPass = (PFN_vkCreateRenderPass)ne_vk_get_device(f, r->device, "vkCreateRenderPass");
-    f->vkDestroyRenderPass = (PFN_vkDestroyRenderPass)ne_vk_get_device(f, r->device, "vkDestroyRenderPass");
+    vkCreateRenderPass = (PFN_vkCreateRenderPass)ne_vk_get_device(r->device, "vkCreateRenderPass");
+    vkDestroyRenderPass = (PFN_vkDestroyRenderPass)ne_vk_get_device(r->device, "vkDestroyRenderPass");
 
     /* Image views */
-    f->vkCreateImageView = (PFN_vkCreateImageView)ne_vk_get_device(f, r->device, "vkCreateImageView");
-    f->vkDestroyImageView = (PFN_vkDestroyImageView)ne_vk_get_device(f, r->device, "vkDestroyImageView");
+    vkCreateImageView = (PFN_vkCreateImageView)ne_vk_get_device(r->device, "vkCreateImageView");
+    vkDestroyImageView = (PFN_vkDestroyImageView)ne_vk_get_device(r->device, "vkDestroyImageView");
 
     /* Framebuffers */
-    f->vkCreateFramebuffer = (PFN_vkCreateFramebuffer)ne_vk_get_device(f, r->device, "vkCreateFramebuffer");
-    f->vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)ne_vk_get_device(f, r->device, "vkDestroyFramebuffer");
+    vkCreateFramebuffer = (PFN_vkCreateFramebuffer)ne_vk_get_device(r->device, "vkCreateFramebuffer");
+    vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)ne_vk_get_device(r->device, "vkDestroyFramebuffer");
 
     /* Pipeline */
-    f->vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)ne_vk_get_device(f, r->device, "vkCreatePipelineLayout");
-    f->vkDestroyPipelineLayout = (PFN_vkDestroyPipelineLayout)ne_vk_get_device(f, r->device, "vkDestroyPipelineLayout");
-    f->vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)ne_vk_get_device(f, r->device, "vkCreateGraphicsPipelines");
-    f->vkDestroyPipeline = (PFN_vkDestroyPipeline)ne_vk_get_device(f, r->device, "vkDestroyPipeline");
+    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)ne_vk_get_device(r->device, "vkCreatePipelineLayout");
+    vkDestroyPipelineLayout = (PFN_vkDestroyPipelineLayout)ne_vk_get_device(r->device, "vkDestroyPipelineLayout");
+    vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)ne_vk_get_device(r->device, "vkCreateGraphicsPipelines");
+    vkDestroyPipeline = (PFN_vkDestroyPipeline)ne_vk_get_device(r->device, "vkDestroyPipeline");
 
     /* Render pass commands */
-    f->vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)ne_vk_get_device(f, r->device, "vkCmdBeginRenderPass");
-    f->vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)ne_vk_get_device(f, r->device, "vkCmdEndRenderPass");
-    f->vkCmdBindPipeline = (PFN_vkCmdBindPipeline)ne_vk_get_device(f, r->device, "vkCmdBindPipeline");
-    f->vkCmdBindVertexBuffers = (PFN_vkCmdBindVertexBuffers)ne_vk_get_device(f, r->device, "vkCmdBindVertexBuffers");
-    f->vkCmdBindIndexBuffer = (PFN_vkCmdBindIndexBuffer)ne_vk_get_device(f, r->device, "vkCmdBindIndexBuffer");
-    f->vkCmdSetViewport = (PFN_vkCmdSetViewport)ne_vk_get_device(f, r->device, "vkCmdSetViewport");
-    f->vkCmdSetScissor = (PFN_vkCmdSetScissor)ne_vk_get_device(f, r->device, "vkCmdSetScissor");
-    f->vkCmdDraw = (PFN_vkCmdDraw)ne_vk_get_device(f, r->device, "vkCmdDraw");
-    f->vkCmdDrawIndexed = (PFN_vkCmdDrawIndexed)ne_vk_get_device(f, r->device, "vkCmdDrawIndexed");
-    f->vkCmdPushConstants = (PFN_vkCmdPushConstants)ne_vk_get_device(f, r->device, "vkCmdPushConstants");
+    vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)ne_vk_get_device(r->device, "vkCmdBeginRenderPass");
+    vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)ne_vk_get_device(r->device, "vkCmdEndRenderPass");
+    vkCmdBindPipeline = (PFN_vkCmdBindPipeline)ne_vk_get_device(r->device, "vkCmdBindPipeline");
+    vkCmdBindVertexBuffers = (PFN_vkCmdBindVertexBuffers)ne_vk_get_device(r->device, "vkCmdBindVertexBuffers");
+    vkCmdBindIndexBuffer = (PFN_vkCmdBindIndexBuffer)ne_vk_get_device(r->device, "vkCmdBindIndexBuffer");
+    vkCmdSetViewport = (PFN_vkCmdSetViewport)ne_vk_get_device(r->device, "vkCmdSetViewport");
+    vkCmdSetScissor = (PFN_vkCmdSetScissor)ne_vk_get_device(r->device, "vkCmdSetScissor");
+    vkCmdDraw = (PFN_vkCmdDraw)ne_vk_get_device(r->device, "vkCmdDraw");
+    vkCmdDrawIndexed = (PFN_vkCmdDrawIndexed)ne_vk_get_device(r->device, "vkCmdDrawIndexed");
+    vkCmdPushConstants = (PFN_vkCmdPushConstants)ne_vk_get_device(r->device, "vkCmdPushConstants");
 
-    return f->vkDestroyDevice && f->vkGetDeviceQueue && f->vkCreateSwapchainKHR && f->vkGetSwapchainImagesKHR &&
-           f->vkAcquireNextImageKHR && f->vkQueueSubmit && f->vkQueuePresentKHR && f->vkCreateSemaphore && f->vkCreateFence &&
-           f->vkWaitForFences && f->vkResetFences && f->vkCreateCommandPool && f->vkResetCommandBuffer && f->vkAllocateCommandBuffers &&
-           f->vkBeginCommandBuffer && f->vkEndCommandBuffer && f->vkCmdPipelineBarrier && f->vkCmdClearColorImage &&
-           f->vkCreateBuffer && f->vkDestroyBuffer && f->vkGetBufferMemoryRequirements && f->vkAllocateMemory && f->vkFreeMemory && f->vkBindBufferMemory &&
-           f->vkMapMemory && f->vkUnmapMemory && f->vkFlushMappedMemoryRanges && f->vkCmdCopyBuffer &&
-           f->vkCreateShaderModule && f->vkDestroyShaderModule &&
-           f->vkCreateRenderPass && f->vkDestroyRenderPass &&
-           f->vkCreateImageView && f->vkDestroyImageView &&
-           f->vkCreateFramebuffer && f->vkDestroyFramebuffer &&
-           f->vkCreatePipelineLayout && f->vkDestroyPipelineLayout &&
-           f->vkCreateGraphicsPipelines && f->vkDestroyPipeline &&
-           f->vkCmdBeginRenderPass && f->vkCmdEndRenderPass &&
-           f->vkCmdBindPipeline && f->vkCmdBindVertexBuffers && f->vkCmdBindIndexBuffer &&
-           f->vkCmdSetViewport && f->vkCmdSetScissor &&
-           f->vkCmdDraw && f->vkCmdDrawIndexed && f->vkCmdPushConstants;
+    return vkDestroyDevice && vkGetDeviceQueue && vkCreateSwapchainKHR && vkGetSwapchainImagesKHR &&
+           vkAcquireNextImageKHR && vkQueueSubmit && vkQueuePresentKHR && vkCreateSemaphore && vkCreateFence &&
+           vkWaitForFences && vkResetFences && vkCreateCommandPool && vkResetCommandBuffer && vkAllocateCommandBuffers &&
+           vkBeginCommandBuffer && vkEndCommandBuffer && vkCmdPipelineBarrier && vkCmdClearColorImage &&
+           vkCreateBuffer && vkDestroyBuffer && vkGetBufferMemoryRequirements && vkAllocateMemory && vkFreeMemory && vkBindBufferMemory &&
+           vkMapMemory && vkUnmapMemory && vkFlushMappedMemoryRanges && vkCmdCopyBuffer &&
+           vkCreateShaderModule && vkDestroyShaderModule &&
+           vkCreateRenderPass && vkDestroyRenderPass &&
+           vkCreateImageView && vkDestroyImageView &&
+           vkCreateFramebuffer && vkDestroyFramebuffer &&
+           vkCreatePipelineLayout && vkDestroyPipelineLayout &&
+           vkCreateGraphicsPipelines && vkDestroyPipeline &&
+           vkCmdBeginRenderPass && vkCmdEndRenderPass &&
+           vkCmdBindPipeline && vkCmdBindVertexBuffers && vkCmdBindIndexBuffer &&
+           vkCmdSetViewport && vkCmdSetScissor &&
+           vkCmdDraw && vkCmdDrawIndexed && vkCmdPushConstants;
 }
 
 static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
@@ -612,7 +604,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     }
 
     uint32_t phys_count = 0;
-    VkResult vr = r->fns.vkEnumeratePhysicalDevices(r->instance, &phys_count, NULL);
+    VkResult vr = vkEnumeratePhysicalDevices(r->instance, &phys_count, NULL);
     if (vr != VK_SUCCESS || phys_count == 0) {
         NE_LOG_ERROR("vkEnumeratePhysicalDevices failed or no devices (vr=%d)", (int)vr);
         return false;
@@ -623,7 +615,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
         return false;
     }
 
-    vr = r->fns.vkEnumeratePhysicalDevices(r->instance, &phys_count, devs);
+    vr = vkEnumeratePhysicalDevices(r->instance, &phys_count, devs);
     if (vr != VK_SUCCESS) {
         free(devs);
         NE_LOG_ERROR("vkEnumeratePhysicalDevices failed (vr=%d)", (int)vr);
@@ -635,7 +627,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
 
     for (uint32_t d = 0; d < phys_count; d++) {
         uint32_t qf_count = 0;
-        r->fns.vkGetPhysicalDeviceQueueFamilyProperties(devs[d], &qf_count, NULL);
+        vkGetPhysicalDeviceQueueFamilyProperties(devs[d], &qf_count, NULL);
         if (qf_count == 0) {
             continue;
         }
@@ -644,7 +636,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
         if (!qfs) {
             continue;
         }
-        r->fns.vkGetPhysicalDeviceQueueFamilyProperties(devs[d], &qf_count, qfs);
+        vkGetPhysicalDeviceQueueFamilyProperties(devs[d], &qf_count, qfs);
 
         for (uint32_t i = 0; i < qf_count; i++) {
             if ((qfs[i].queueFlags & VK_QUEUE_GRAPHICS_BIT) == 0) {
@@ -652,7 +644,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
             }
 
             VkBool32 present_support = VK_FALSE;
-            vr = r->fns.vkGetPhysicalDeviceSurfaceSupportKHR(devs[d], i, surface, &present_support);
+            vr = vkGetPhysicalDeviceSurfaceSupportKHR(devs[d], i, surface, &present_support);
             if (vr != VK_SUCCESS || !present_support) {
                 continue;
             }
@@ -695,14 +687,14 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     dci.ppEnabledExtensionNames = device_exts;
 
     VkDevice device = VK_NULL_HANDLE;
-    vr = r->fns.vkCreateDevice(chosen, &dci, NULL, &device);
+    vr = vkCreateDevice(chosen, &dci, NULL, &device);
     if (vr != VK_SUCCESS || device == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateDevice failed (vr=%d)", (int)vr);
         return false;
     }
 
     r->phys = chosen;
-    r->fns.vkGetPhysicalDeviceMemoryProperties(r->phys, &r->mem_props);
+    vkGetPhysicalDeviceMemoryProperties(r->phys, &r->mem_props);
     r->device = device;
     r->queue_family_index = chosen_qfi;
 
@@ -711,7 +703,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
         return false;
     }
 
-    r->fns.vkGetDeviceQueue(r->device, r->queue_family_index, 0, &r->queue);
+    vkGetDeviceQueue(r->device, r->queue_family_index, 0, &r->queue);
     if (r->queue == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkGetDeviceQueue returned NULL queue");
         return false;
@@ -726,7 +718,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT | VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
     pool_info.queueFamilyIndex = r->queue_family_index;
 
-    vr = r->fns.vkCreateCommandPool(r->device, &pool_info, NULL, &r->transfer_cmd_pool);
+    vr = vkCreateCommandPool(r->device, &pool_info, NULL, &r->transfer_cmd_pool);
     if (vr != VK_SUCCESS || r->transfer_cmd_pool == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateCommandPool (transfer) failed (vr=%d)", (int)vr);
         return false;
@@ -740,10 +732,10 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     alloc_info.commandBufferCount = 1;
 
-    vr = r->fns.vkAllocateCommandBuffers(r->device, &alloc_info, &r->transfer_cmd);
+    vr = vkAllocateCommandBuffers(r->device, &alloc_info, &r->transfer_cmd);
     if (vr != VK_SUCCESS || r->transfer_cmd == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkAllocateCommandBuffers (transfer) failed (vr=%d)", (int)vr);
-        r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
+        vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
         r->transfer_cmd_pool = VK_NULL_HANDLE;
         return false;
     }
@@ -752,10 +744,10 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     memset(&fence_ci, 0, sizeof(fence_ci));
     fence_ci.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 
-    vr = r->fns.vkCreateFence(r->device, &fence_ci, NULL, &r->transfer_fence);
+    vr = vkCreateFence(r->device, &fence_ci, NULL, &r->transfer_fence);
     if (vr != VK_SUCCESS || r->transfer_fence == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateFence (transfer) failed (vr=%d)", (int)vr);
-        r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
+        vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
         r->transfer_cmd_pool = VK_NULL_HANDLE;
         r->transfer_cmd = VK_NULL_HANDLE;
         return false;
@@ -846,16 +838,16 @@ static void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
     /* Image slots alias `buffer` with `image` in the union; free them as images
      * (this also releases the imageView, which the buffer path would leak). */
     if (slot->usage & (NE_BUFFER_USAGE_IMAGE_STORAGE | NE_BUFFER_USAGE_IMAGE_SAMPLED)) {
-        if (slot->image != VK_NULL_HANDLE && r->fns.vkDestroyImage) {
-            r->fns.vkDestroyImage(r->device, slot->image, NULL);
+        if (slot->image != VK_NULL_HANDLE && vkDestroyImage) {
+            vkDestroyImage(r->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
         }
-        if (slot->imageView != VK_NULL_HANDLE && r->fns.vkDestroyImageView) {
-            r->fns.vkDestroyImageView(r->device, slot->imageView, NULL);
+        if (slot->imageView != VK_NULL_HANDLE && vkDestroyImageView) {
+            vkDestroyImageView(r->device, slot->imageView, NULL);
             slot->imageView = VK_NULL_HANDLE;
         }
-        if (slot->memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
-            r->fns.vkFreeMemory(r->device, slot->memory, NULL);
+        if (slot->memory != VK_NULL_HANDLE && vkFreeMemory) {
+            vkFreeMemory(r->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
         }
         return;
@@ -864,27 +856,27 @@ static void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
     if (slot->dynamic) {
         for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
             if (slot->dyn_mapped[i]) {
-                r->fns.vkUnmapMemory(r->device, slot->dyn_memories[i]);
+                vkUnmapMemory(r->device, slot->dyn_memories[i]);
                 slot->dyn_mapped[i] = NULL;
             }
-            if (slot->dyn_buffers[i] != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
-                r->fns.vkDestroyBuffer(r->device, slot->dyn_buffers[i], NULL);
+            if (slot->dyn_buffers[i] != VK_NULL_HANDLE && vkDestroyBuffer) {
+                vkDestroyBuffer(r->device, slot->dyn_buffers[i], NULL);
                 slot->dyn_buffers[i] = VK_NULL_HANDLE;
             }
-            if (slot->dyn_memories[i] != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
-                r->fns.vkFreeMemory(r->device, slot->dyn_memories[i], NULL);
+            if (slot->dyn_memories[i] != VK_NULL_HANDLE && vkFreeMemory) {
+                vkFreeMemory(r->device, slot->dyn_memories[i], NULL);
                 slot->dyn_memories[i] = VK_NULL_HANDLE;
             }
         }
         return;
     }
 
-    if (slot->buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
-        r->fns.vkDestroyBuffer(r->device, slot->buffer, NULL);
+    if (slot->buffer != VK_NULL_HANDLE && vkDestroyBuffer) {
+        vkDestroyBuffer(r->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
     }
-    if (slot->memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
-        r->fns.vkFreeMemory(r->device, slot->memory, NULL);
+    if (slot->memory != VK_NULL_HANDLE && vkFreeMemory) {
+        vkFreeMemory(r->device, slot->memory, NULL);
         slot->memory = VK_NULL_HANDLE;
     }
 }
@@ -908,15 +900,15 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
 
     /* Clean up old staging buffer if it exists */
     if (r->staging_mapped) {
-        r->fns.vkUnmapMemory(r->device, r->staging_memory);
+        vkUnmapMemory(r->device, r->staging_memory);
         r->staging_mapped = NULL;
     }
-    if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
-        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+    if (r->staging_buffer != VK_NULL_HANDLE && vkDestroyBuffer) {
+        vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
     }
-    if (r->staging_memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
-        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+    if (r->staging_memory != VK_NULL_HANDLE && vkFreeMemory) {
+        vkFreeMemory(r->device, r->staging_memory, NULL);
         r->staging_memory = VK_NULL_HANDLE;
     }
     r->staging_size = 0;
@@ -931,7 +923,7 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
     buf_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT;
     buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult vr = r->fns.vkCreateBuffer(r->device, &buf_info, NULL, &r->staging_buffer);
+    VkResult vr = vkCreateBuffer(r->device, &buf_info, NULL, &r->staging_buffer);
     if (vr != VK_SUCCESS || r->staging_buffer == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateBuffer (staging) failed (vr=%d)", (int)vr);
         return false;
@@ -939,7 +931,7 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
 
     /* Get memory requirements for the staging buffer */
     VkMemoryRequirements mem_req;
-    r->fns.vkGetBufferMemoryRequirements(r->device, r->staging_buffer, &mem_req);
+    vkGetBufferMemoryRequirements(r->device, r->staging_buffer, &mem_req);
 
     /* Find a suitable memory type: host-visible and coherent for CPU mapping */
     uint32_t mem_type = ne_vk_find_memory_type(
@@ -950,7 +942,7 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
 
     if (mem_type == UINT32_MAX) {
         NE_LOG_ERROR("failed to find suitable memory type for staging buffer");
-        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
         return false;
     }
@@ -962,33 +954,33 @@ static bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
     alloc_info.allocationSize = mem_req.size;
     alloc_info.memoryTypeIndex = mem_type;
 
-    vr = r->fns.vkAllocateMemory(r->device, &alloc_info, NULL, &r->staging_memory);
+    vr = vkAllocateMemory(r->device, &alloc_info, NULL, &r->staging_memory);
     if (vr != VK_SUCCESS || r->staging_memory == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkAllocateMemory (staging) failed (vr=%d)", (int)vr);
-        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
         return false;
     }
 
     /* Bind the memory to the buffer */
-    vr = r->fns.vkBindBufferMemory(r->device, r->staging_buffer, r->staging_memory, 0);
+    vr = vkBindBufferMemory(r->device, r->staging_buffer, r->staging_memory, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBindBufferMemory (staging) failed (vr=%d)", (int)vr);
-        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+        vkFreeMemory(r->device, r->staging_memory, NULL);
         r->staging_memory = VK_NULL_HANDLE;
-        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
         return false;
     }
 
     /* Map the staging memory for CPU access (use actual allocated size) */
     void *mapped_ptr = NULL;
-    vr = r->fns.vkMapMemory(r->device, r->staging_memory, 0, mem_req.size, 0, &mapped_ptr);
+    vr = vkMapMemory(r->device, r->staging_memory, 0, mem_req.size, 0, &mapped_ptr);
     if (vr != VK_SUCCESS || !mapped_ptr) {
         NE_LOG_ERROR("vkMapMemory (staging) failed (vr=%d)", (int)vr);
-        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+        vkFreeMemory(r->device, r->staging_memory, NULL);
         r->staging_memory = VK_NULL_HANDLE;
-        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+        vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
         return false;
     }
@@ -1014,7 +1006,7 @@ static bool ne_vk_create_render_pass(NERenderSurface *surface, VkFormat format) 
 
     /* Destroy previous render pass if format changed. */
     if (surface->render_pass != VK_NULL_HANDLE) {
-        r->fns.vkDestroyRenderPass(r->device, surface->render_pass, NULL);
+        vkDestroyRenderPass(r->device, surface->render_pass, NULL);
         surface->render_pass = VK_NULL_HANDLE;
     }
 
@@ -1059,7 +1051,7 @@ static bool ne_vk_create_render_pass(NERenderSurface *surface, VkFormat format) 
     rpci.dependencyCount = 1;
     rpci.pDependencies   = &dependency;
 
-    VkResult vr = r->fns.vkCreateRenderPass(r->device, &rpci, NULL, &surface->render_pass);
+    VkResult vr = vkCreateRenderPass(r->device, &rpci, NULL, &surface->render_pass);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkCreateRenderPass failed (vr=%d)", (int)vr);
         return false;
@@ -1091,14 +1083,14 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     ne_vk_swapchain_cleanup(r, &surface->sc);
 
     VkSurfaceCapabilitiesKHR caps;
-    VkResult vr = r->fns.vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->phys, surface->surface, &caps);
+    VkResult vr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->phys, surface->surface, &caps);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed (vr=%d)", (int)vr);
         return false;
     }
 
     uint32_t format_count = 0;
-    vr = r->fns.vkGetPhysicalDeviceSurfaceFormatsKHR(r->phys, surface->surface, &format_count, NULL);
+    vr = vkGetPhysicalDeviceSurfaceFormatsKHR(r->phys, surface->surface, &format_count, NULL);
     if (vr != VK_SUCCESS || format_count == 0) {
         NE_LOG_ERROR("vkGetPhysicalDeviceSurfaceFormatsKHR failed/no formats (vr=%d)", (int)vr);
         return false;
@@ -1109,7 +1101,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
         return false;
     }
 
-    vr = r->fns.vkGetPhysicalDeviceSurfaceFormatsKHR(r->phys, surface->surface, &format_count, formats);
+    vr = vkGetPhysicalDeviceSurfaceFormatsKHR(r->phys, surface->surface, &format_count, formats);
     if (vr != VK_SUCCESS) {
         free(formats);
         NE_LOG_ERROR("vkGetPhysicalDeviceSurfaceFormatsKHR failed (vr=%d)", (int)vr);
@@ -1120,7 +1112,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     free(formats);
 
     uint32_t mode_count = 0;
-    vr = r->fns.vkGetPhysicalDeviceSurfacePresentModesKHR(r->phys, surface->surface, &mode_count, NULL);
+    vr = vkGetPhysicalDeviceSurfacePresentModesKHR(r->phys, surface->surface, &mode_count, NULL);
     if (vr != VK_SUCCESS || mode_count == 0) {
         NE_LOG_ERROR("vkGetPhysicalDeviceSurfacePresentModesKHR failed/no modes (vr=%d)", (int)vr);
         return false;
@@ -1131,7 +1123,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
         return false;
     }
 
-    vr = r->fns.vkGetPhysicalDeviceSurfacePresentModesKHR(r->phys, surface->surface, &mode_count, modes);
+    vr = vkGetPhysicalDeviceSurfacePresentModesKHR(r->phys, surface->surface, &mode_count, modes);
     if (vr != VK_SUCCESS) {
         free(modes);
         NE_LOG_ERROR("vkGetPhysicalDeviceSurfacePresentModesKHR failed (vr=%d)", (int)vr);
@@ -1184,7 +1176,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     sci.clipped = VK_TRUE;
     sci.oldSwapchain = VK_NULL_HANDLE;
 
-    vr = r->fns.vkCreateSwapchainKHR(r->device, &sci, NULL, &surface->sc.swapchain);
+    vr = vkCreateSwapchainKHR(r->device, &sci, NULL, &surface->sc.swapchain);
     if (vr != VK_SUCCESS || surface->sc.swapchain == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateSwapchainKHR failed (vr=%d)", (int)vr);
         surface->sc.swapchain = VK_NULL_HANDLE;
@@ -1196,7 +1188,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     surface->sc.extent = extent;
 
     uint32_t img_count = 0;
-    vr = r->fns.vkGetSwapchainImagesKHR(r->device, surface->sc.swapchain, &img_count, NULL);
+    vr = vkGetSwapchainImagesKHR(r->device, surface->sc.swapchain, &img_count, NULL);
     if (vr != VK_SUCCESS || img_count == 0) {
         NE_LOG_ERROR("vkGetSwapchainImagesKHR failed/no images (vr=%d)", (int)vr);
         return false;
@@ -1207,7 +1199,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
         return false;
     }
 
-    vr = r->fns.vkGetSwapchainImagesKHR(r->device, surface->sc.swapchain, &img_count, surface->sc.images);
+    vr = vkGetSwapchainImagesKHR(r->device, surface->sc.swapchain, &img_count, surface->sc.images);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkGetSwapchainImagesKHR failed (vr=%d)", (int)vr);
         return false;
@@ -1251,7 +1243,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
         ivci.subresourceRange.baseArrayLayer = 0;
         ivci.subresourceRange.layerCount     = 1;
 
-        vr = r->fns.vkCreateImageView(r->device, &ivci, NULL, &surface->sc.image_views[i]);
+        vr = vkCreateImageView(r->device, &ivci, NULL, &surface->sc.image_views[i]);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkCreateImageView[%u] failed (vr=%d)", (unsigned)i, (int)vr);
             return false;
@@ -1276,7 +1268,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
         fbci.height          = surface->sc.extent.height;
         fbci.layers          = 1;
 
-        vr = r->fns.vkCreateFramebuffer(r->device, &fbci, NULL, &surface->sc.framebuffers[i]);
+        vr = vkCreateFramebuffer(r->device, &fbci, NULL, &surface->sc.framebuffers[i]);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkCreateFramebuffer[%u] failed (vr=%d)", (unsigned)i, (int)vr);
             return false;
@@ -1295,14 +1287,14 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     cbai.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
     cbai.commandBufferCount = NE_VK_MAX_FRAMES_IN_FLIGHT;
 
-    vr = r->fns.vkCreateCommandPool(r->device, &cpci, NULL, &surface->sc.cmd_pool);
+    vr = vkCreateCommandPool(r->device, &cpci, NULL, &surface->sc.cmd_pool);
     if (vr != VK_SUCCESS || surface->sc.cmd_pool == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateCommandPool failed (vr=%d)", (int)vr);
         return false;
     }
 
     cbai.commandPool = surface->sc.cmd_pool;
-    vr = r->fns.vkAllocateCommandBuffers(r->device, &cbai, surface->sc.cmds);
+    vr = vkAllocateCommandBuffers(r->device, &cbai, surface->sc.cmds);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkAllocateCommandBuffers failed (vr=%d)", (int)vr);
         return false;
@@ -1320,7 +1312,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     sci_sem.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 
     for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
-        vr = r->fns.vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sc.sem_image_available[i]);
+        vr = vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sc.sem_image_available[i]);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkCreateSemaphore(image_available[%u]) failed (vr=%d)", (unsigned)i, (int)vr);
             return false;
@@ -1333,7 +1325,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     }
 
     for (uint32_t i = 0; i < surface->sc.image_count; i++) {
-        vr = r->fns.vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sc.sem_render_finished[i]);
+        vr = vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sc.sem_render_finished[i]);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkCreateSemaphore(render_finished[%u]) failed (vr=%d)", (unsigned)i, (int)vr);
             return false;
@@ -1346,7 +1338,7 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
     fci.flags = VK_FENCE_CREATE_SIGNALED_BIT;
 
     for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
-        vr = r->fns.vkCreateFence(r->device, &fci, NULL, &surface->sc.fences_in_flight[i]);
+        vr = vkCreateFence(r->device, &fci, NULL, &surface->sc.fences_in_flight[i]);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkCreateFence[%u] failed (vr=%d)", (unsigned)i, (int)vr);
             return false;
@@ -1378,22 +1370,22 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
 
     /* Enumerate extensions and layers once, then check against the cached lists. */
     uint32_t avail_ext_count = 0;
-    r->fns.vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
+    vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
     VkExtensionProperties *avail_exts = NULL;
     if (avail_ext_count > 0) {
         avail_exts = (VkExtensionProperties *)calloc(avail_ext_count, sizeof(VkExtensionProperties));
         if (avail_exts) {
-            r->fns.vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
+            vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, avail_exts);
         }
     }
 
     uint32_t avail_layer_count = 0;
-    r->fns.vkEnumerateInstanceLayerProperties(&avail_layer_count, NULL);
+    vkEnumerateInstanceLayerProperties(&avail_layer_count, NULL);
     VkLayerProperties *avail_layers = NULL;
     if (avail_layer_count > 0) {
         avail_layers = (VkLayerProperties *)calloc(avail_layer_count, sizeof(VkLayerProperties));
         if (avail_layers) {
-            r->fns.vkEnumerateInstanceLayerProperties(&avail_layer_count, avail_layers);
+            vkEnumerateInstanceLayerProperties(&avail_layer_count, avail_layers);
         }
     }
 
@@ -1469,7 +1461,7 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
     ici.enabledLayerCount = layer_count;
     ici.ppEnabledLayerNames = layer_count ? layers : NULL;
 
-    VkResult vr = r->fns.vkCreateInstance(&ici, NULL, &r->instance);
+    VkResult vr = vkCreateInstance(&ici, NULL, &r->instance);
     if (vr != VK_SUCCESS || r->instance == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateInstance failed: %d", (int)vr);
         ne_renderer_destroy(r);
@@ -1492,8 +1484,8 @@ void ne_renderer_destroy(NERenderer *r) {
     }
 
     /* Drain the GPU before tearing down any resources. */
-    if (r->device != VK_NULL_HANDLE && r->fns.vkDeviceWaitIdle) {
-        (void)r->fns.vkDeviceWaitIdle(r->device);
+    if (r->device != VK_NULL_HANDLE && vkDeviceWaitIdle) {
+        (void)vkDeviceWaitIdle(r->device);
     }
 
     /* Destroy surfaces first (this cleans up swapchains). */
@@ -1503,13 +1495,13 @@ void ne_renderer_destroy(NERenderer *r) {
 
         ne_vk_swapchain_cleanup(r, &s->sc);
 
-        if (s->render_pass != VK_NULL_HANDLE && r->fns.vkDestroyRenderPass) {
-            r->fns.vkDestroyRenderPass(r->device, s->render_pass, NULL);
+        if (s->render_pass != VK_NULL_HANDLE && vkDestroyRenderPass) {
+            vkDestroyRenderPass(r->device, s->render_pass, NULL);
             s->render_pass = VK_NULL_HANDLE;
         }
 
-        if (s->surface != VK_NULL_HANDLE && r->fns.vkDestroySurfaceKHR) {
-            r->fns.vkDestroySurfaceKHR(r->instance, s->surface, NULL);
+        if (s->surface != VK_NULL_HANDLE && vkDestroySurfaceKHR) {
+            vkDestroySurfaceKHR(r->instance, s->surface, NULL);
             s->surface = VK_NULL_HANDLE;
         }
 
@@ -1534,8 +1526,8 @@ void ne_renderer_destroy(NERenderer *r) {
     for (uint32_t i = 0; i < r->shaders.cap; i++) {
         NEVulkanShaderSlot *sslot = &((NEVulkanShaderSlot*)r->shaders.slots)[i];
         if (sslot->occupied) {
-            if (sslot->module != VK_NULL_HANDLE && r->fns.vkDestroyShaderModule) {
-                r->fns.vkDestroyShaderModule(r->device, sslot->module, NULL);
+            if (sslot->module != VK_NULL_HANDLE && vkDestroyShaderModule) {
+                vkDestroyShaderModule(r->device, sslot->module, NULL);
             }
             free(sslot->entry_point);
         }
@@ -1546,11 +1538,11 @@ void ne_renderer_destroy(NERenderer *r) {
     for (uint32_t i = 0; i < r->pipelines.cap; i++) {
         NEVulkanPipelineSlot *pslot = &((NEVulkanPipelineSlot*)r->pipelines.slots)[i];
         if (pslot->occupied) {
-            if (pslot->pipeline != VK_NULL_HANDLE && r->fns.vkDestroyPipeline) {
-                r->fns.vkDestroyPipeline(r->device, pslot->pipeline, NULL);
+            if (pslot->pipeline != VK_NULL_HANDLE && vkDestroyPipeline) {
+                vkDestroyPipeline(r->device, pslot->pipeline, NULL);
             }
-            if (pslot->layout != VK_NULL_HANDLE && r->fns.vkDestroyPipelineLayout) {
-                r->fns.vkDestroyPipelineLayout(r->device, pslot->layout, NULL);
+            if (pslot->layout != VK_NULL_HANDLE && vkDestroyPipelineLayout) {
+                vkDestroyPipelineLayout(r->device, pslot->layout, NULL);
             }
             free(pslot->vert_entry);
             free(pslot->frag_entry);
@@ -1561,37 +1553,37 @@ void ne_renderer_destroy(NERenderer *r) {
     ne_pool_destroy(&r->pipelines);
 
     /* Destroy staging buffer and transfer command pool. */
-    if (r->staging_buffer != VK_NULL_HANDLE && r->fns.vkDestroyBuffer) {
-        r->fns.vkDestroyBuffer(r->device, r->staging_buffer, NULL);
+    if (r->staging_buffer != VK_NULL_HANDLE && vkDestroyBuffer) {
+        vkDestroyBuffer(r->device, r->staging_buffer, NULL);
         r->staging_buffer = VK_NULL_HANDLE;
     }
-    if (r->staging_memory != VK_NULL_HANDLE && r->fns.vkFreeMemory) {
-        r->fns.vkFreeMemory(r->device, r->staging_memory, NULL);
+    if (r->staging_memory != VK_NULL_HANDLE && vkFreeMemory) {
+        vkFreeMemory(r->device, r->staging_memory, NULL);
         r->staging_memory = VK_NULL_HANDLE;
     }
     r->staging_mapped = NULL;
     r->staging_size = 0;
 
-    if (r->transfer_fence != VK_NULL_HANDLE && r->fns.vkDestroyFence) {
-        r->fns.vkDestroyFence(r->device, r->transfer_fence, NULL);
+    if (r->transfer_fence != VK_NULL_HANDLE && vkDestroyFence) {
+        vkDestroyFence(r->device, r->transfer_fence, NULL);
         r->transfer_fence = VK_NULL_HANDLE;
     }
-    if (r->transfer_cmd_pool != VK_NULL_HANDLE && r->fns.vkDestroyCommandPool) {
-        r->fns.vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
+    if (r->transfer_cmd_pool != VK_NULL_HANDLE && vkDestroyCommandPool) {
+        vkDestroyCommandPool(r->device, r->transfer_cmd_pool, NULL);
         r->transfer_cmd_pool = VK_NULL_HANDLE;
     }
     r->transfer_cmd = VK_NULL_HANDLE;
 
-    if (r->device != VK_NULL_HANDLE && r->fns.vkDestroyDevice) {
-        r->fns.vkDestroyDevice(r->device, NULL);
+    if (r->device != VK_NULL_HANDLE && vkDestroyDevice) {
+        vkDestroyDevice(r->device, NULL);
         r->device = VK_NULL_HANDLE;
         r->queue = VK_NULL_HANDLE;
         r->phys = VK_NULL_HANDLE;
         r->queue_family_index = 0;
     }
 
-    if (r->instance != VK_NULL_HANDLE && r->fns.vkDestroyInstance) {
-        r->fns.vkDestroyInstance(r->instance, NULL);
+    if (r->instance != VK_NULL_HANDLE && vkDestroyInstance) {
+        vkDestroyInstance(r->instance, NULL);
         r->instance = VK_NULL_HANDLE;
     }
 
@@ -1636,7 +1628,7 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
     sci.hwnd = hwnd;
 
     VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
-    const VkResult vr = r->fns.vkCreateWin32SurfaceKHR(r->instance, &sci, NULL, &vk_surface);
+    const VkResult vr = vkCreateWin32SurfaceKHR(r->instance, &sci, NULL, &vk_surface);
     if (vr != VK_SUCCESS || vk_surface == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateWin32SurfaceKHR failed: %d", (int)vr);
         return NULL;
@@ -1644,7 +1636,7 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
 
     NERenderSurface *surface = (NERenderSurface *)calloc(1, sizeof(NERenderSurface));
     if (!surface) {
-        r->fns.vkDestroySurfaceKHR(r->instance, vk_surface, NULL);
+        vkDestroySurfaceKHR(r->instance, vk_surface, NULL);
         return NULL;
     }
 
@@ -1680,7 +1672,7 @@ void ne_renderer_destroy_surface(NERenderer *r, NERenderSurface *surface) {
         return;
     }
 
-    (void)r->fns.vkDeviceWaitIdle(r->device);
+    (void)vkDeviceWaitIdle(r->device);
 
     NERenderSurface **pp = &r->surfaces;
     while (*pp) {
@@ -1694,12 +1686,12 @@ void ne_renderer_destroy_surface(NERenderer *r, NERenderSurface *surface) {
     ne_vk_swapchain_cleanup(r, &surface->sc);
 
     if (surface->render_pass != VK_NULL_HANDLE) {
-        r->fns.vkDestroyRenderPass(r->device, surface->render_pass, NULL);
+        vkDestroyRenderPass(r->device, surface->render_pass, NULL);
         surface->render_pass = VK_NULL_HANDLE;
     }
 
     if (surface->surface != VK_NULL_HANDLE) {
-        r->fns.vkDestroySurfaceKHR(r->instance, surface->surface, NULL);
+        vkDestroySurfaceKHR(r->instance, surface->surface, NULL);
         surface->surface = VK_NULL_HANDLE;
     }
 
@@ -1737,13 +1729,13 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
 
     const uint32_t frame = surface->sc.frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
-    const VkResult vr_wait = r->fns.vkWaitForFences(r->device, 1, &surface->sc.fences_in_flight[frame], VK_TRUE, UINT64_MAX);
+    const VkResult vr_wait = vkWaitForFences(r->device, 1, &surface->sc.fences_in_flight[frame], VK_TRUE, UINT64_MAX);
     if (vr_wait != VK_SUCCESS) {
         return NULL;
     }
 
     uint32_t image_index = 0;
-    VkResult vr = r->fns.vkAcquireNextImageKHR(r->device, surface->sc.swapchain, UINT64_MAX,
+    VkResult vr = vkAcquireNextImageKHR(r->device, surface->sc.swapchain, UINT64_MAX,
                                               surface->sc.sem_image_available[frame], VK_NULL_HANDLE, &image_index);
 
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
@@ -1767,12 +1759,12 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
      */
     if (surface->sc.images_in_flight && surface->sc.images_in_flight[image_index] != VK_NULL_HANDLE &&
         surface->sc.images_in_flight[image_index] != surface->sc.fences_in_flight[frame]) {
-        (void)r->fns.vkWaitForFences(r->device, 1, &surface->sc.images_in_flight[image_index], VK_TRUE, UINT64_MAX);
+        (void)vkWaitForFences(r->device, 1, &surface->sc.images_in_flight[image_index], VK_TRUE, UINT64_MAX);
     }
 
-    (void)r->fns.vkResetFences(r->device, 1, &surface->sc.fences_in_flight[frame]);
-    if (r->fns.vkResetCommandBuffer) {
-        (void)r->fns.vkResetCommandBuffer(surface->sc.cmds[frame], 0);
+    (void)vkResetFences(r->device, 1, &surface->sc.fences_in_flight[frame]);
+    if (vkResetCommandBuffer) {
+        (void)vkResetCommandBuffer(surface->sc.cmds[frame], 0);
     }
 
     if (surface->sc.images_in_flight) {
@@ -1788,7 +1780,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = 0;
 
-    vr = r->fns.vkBeginCommandBuffer(cmd, &bi);
+    vr = vkBeginCommandBuffer(cmd, &bi);
     if (vr != VK_SUCCESS) {
         return NULL;
     }
@@ -1812,7 +1804,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     rpbi.clearValueCount   = 1;
     rpbi.pClearValues      = &clear_value;
 
-    r->fns.vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
+    vkCmdBeginRenderPass(cmd, &rpbi, VK_SUBPASS_CONTENTS_INLINE);
 
     /* Set default viewport and scissor to match the surface extent. */
     VkViewport viewport;
@@ -1824,14 +1816,14 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
-    r->fns.vkCmdSetViewport(cmd, 0, 1, &viewport);
+    vkCmdSetViewport(cmd, 0, 1, &viewport);
 
     VkRect2D scissor;
     memset(&scissor, 0, sizeof(scissor));
     scissor.offset = (VkOffset2D){0, 0};
     scissor.extent = surface->sc.extent;
 
-    r->fns.vkCmdSetScissor(cmd, 0, 1, &scissor);
+    vkCmdSetScissor(cmd, 0, 1, &scissor);
 
     g_active_pass.surface      = surface;
     g_active_pass.cmd          = cmd;
@@ -1853,9 +1845,9 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     /* ── Close the render pass and command buffer ────────────────────── */
 
     VkCommandBuffer cmd = pass->cmd;
-    r->fns.vkCmdEndRenderPass(cmd);
+    vkCmdEndRenderPass(cmd);
 
-    VkResult vr = r->fns.vkEndCommandBuffer(cmd);
+    VkResult vr = vkEndCommandBuffer(cmd);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkEndCommandBuffer failed (vr=%d)", (int)vr);
         pass->surface      = NULL;
@@ -1883,7 +1875,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     si.signalSemaphoreCount = 1;
     si.pSignalSemaphores = &surface->sc.sem_render_finished[image_index];
 
-    vr = r->fns.vkQueueSubmit(r->queue, 1, &si, surface->sc.fences_in_flight[frame_index]);
+    vr = vkQueueSubmit(r->queue, 1, &si, surface->sc.fences_in_flight[frame_index]);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit failed (vr=%d)", (int)vr);
         surface->wants_swapchain_recreate = true;
@@ -1899,7 +1891,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderPass *pass) {
     pi.pSwapchains = &surface->sc.swapchain;
     pi.pImageIndices = &image_index;
 
-    vr = r->fns.vkQueuePresentKHR(r->queue, &pi);
+    vr = vkQueuePresentKHR(r->queue, &pi);
     if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
         surface->wants_swapchain_recreate = true;
     } else if (vr != VK_SUCCESS) {
@@ -1950,13 +1942,13 @@ static bool ne_vk_submit_transfer_cmd(NERenderer *r, VkCommandBuffer cmd) {
         return false;
     }
 
-    VkResult vr = r->fns.vkEndCommandBuffer(cmd);
+    VkResult vr = vkEndCommandBuffer(cmd);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkEndCommandBuffer (transfer) failed (vr=%d)", (int)vr);
         return false;
     }
 
-    vr = r->fns.vkResetFences(r->device, 1, &r->transfer_fence);
+    vr = vkResetFences(r->device, 1, &r->transfer_fence);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkResetFences (transfer) failed (vr=%d)", (int)vr);
         return false;
@@ -1968,13 +1960,13 @@ static bool ne_vk_submit_transfer_cmd(NERenderer *r, VkCommandBuffer cmd) {
     submit_info.commandBufferCount = 1;
     submit_info.pCommandBuffers = &cmd;
 
-    vr = r->fns.vkQueueSubmit(r->queue, 1, &submit_info, r->transfer_fence);
+    vr = vkQueueSubmit(r->queue, 1, &submit_info, r->transfer_fence);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit (transfer) failed (vr=%d)", (int)vr);
         return false;
     }
 
-    vr = r->fns.vkWaitForFences(r->device, 1, &r->transfer_fence, VK_TRUE, UINT64_MAX);
+    vr = vkWaitForFences(r->device, 1, &r->transfer_fence, VK_TRUE, UINT64_MAX);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkWaitForFences (transfer) failed (vr=%d)", (int)vr);
         return false;
@@ -2043,14 +2035,14 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             dbi.usage = dyn_usage;
             dbi.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-            VkResult dvr = renderer->fns.vkCreateBuffer(renderer->device, &dbi, NULL, &slot->dyn_buffers[i]);
+            VkResult dvr = vkCreateBuffer(renderer->device, &dbi, NULL, &slot->dyn_buffers[i]);
             if (dvr != VK_SUCCESS || slot->dyn_buffers[i] == VK_NULL_HANDLE) {
                 NE_LOG_ERROR("vkCreateBuffer (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
                 goto dynamic_fail;
             }
 
             VkMemoryRequirements dmr;
-            renderer->fns.vkGetBufferMemoryRequirements(renderer->device, slot->dyn_buffers[i], &dmr);
+            vkGetBufferMemoryRequirements(renderer->device, slot->dyn_buffers[i], &dmr);
 
             uint32_t dmt = ne_vk_find_memory_type(
                 renderer, dmr.memoryTypeBits,
@@ -2066,19 +2058,19 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
             dai.allocationSize = dmr.size;
             dai.memoryTypeIndex = dmt;
 
-            dvr = renderer->fns.vkAllocateMemory(renderer->device, &dai, NULL, &slot->dyn_memories[i]);
+            dvr = vkAllocateMemory(renderer->device, &dai, NULL, &slot->dyn_memories[i]);
             if (dvr != VK_SUCCESS || slot->dyn_memories[i] == VK_NULL_HANDLE) {
                 NE_LOG_ERROR("vkAllocateMemory (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
                 goto dynamic_fail;
             }
 
-            dvr = renderer->fns.vkBindBufferMemory(renderer->device, slot->dyn_buffers[i], slot->dyn_memories[i], 0);
+            dvr = vkBindBufferMemory(renderer->device, slot->dyn_buffers[i], slot->dyn_memories[i], 0);
             if (dvr != VK_SUCCESS) {
                 NE_LOG_ERROR("vkBindBufferMemory (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
                 goto dynamic_fail;
             }
 
-            dvr = renderer->fns.vkMapMemory(renderer->device, slot->dyn_memories[i], 0, desc->size, 0, &slot->dyn_mapped[i]);
+            dvr = vkMapMemory(renderer->device, slot->dyn_memories[i], 0, desc->size, 0, &slot->dyn_mapped[i]);
             if (dvr != VK_SUCCESS || !slot->dyn_mapped[i]) {
                 NE_LOG_ERROR("vkMapMemory (dynamic copy %u) failed (vr=%d)", i, (int)dvr);
                 goto dynamic_fail;
@@ -2097,15 +2089,15 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         /* Release any dynamic resources created before the failure. */
         for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
             if (slot->dyn_mapped[i]) {
-                renderer->fns.vkUnmapMemory(renderer->device, slot->dyn_memories[i]);
+                vkUnmapMemory(renderer->device, slot->dyn_memories[i]);
                 slot->dyn_mapped[i] = NULL;
             }
             if (slot->dyn_memories[i] != VK_NULL_HANDLE) {
-                renderer->fns.vkFreeMemory(renderer->device, slot->dyn_memories[i], NULL);
+                vkFreeMemory(renderer->device, slot->dyn_memories[i], NULL);
                 slot->dyn_memories[i] = VK_NULL_HANDLE;
             }
             if (slot->dyn_buffers[i] != VK_NULL_HANDLE) {
-                renderer->fns.vkDestroyBuffer(renderer->device, slot->dyn_buffers[i], NULL);
+                vkDestroyBuffer(renderer->device, slot->dyn_buffers[i], NULL);
                 slot->dyn_buffers[i] = VK_NULL_HANDLE;
             }
         }
@@ -2123,7 +2115,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     buf_info.usage = vk_usage;
     buf_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 
-    VkResult vr = renderer->fns.vkCreateBuffer(renderer->device, &buf_info, NULL, &slot->buffer);
+    VkResult vr = vkCreateBuffer(renderer->device, &buf_info, NULL, &slot->buffer);
     if (vr != VK_SUCCESS || slot->buffer == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateBuffer failed (vr=%d, size=%u)", (int)vr, desc->size);
         slot->occupied = false;
@@ -2133,7 +2125,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
 
     /* Get memory requirements for the buffer */
     VkMemoryRequirements mem_req;
-    renderer->fns.vkGetBufferMemoryRequirements(renderer->device, slot->buffer, &mem_req);
+    vkGetBufferMemoryRequirements(renderer->device, slot->buffer, &mem_req);
 
     /* Find device-local memory for the GPU buffer */
     uint32_t mem_type = ne_vk_find_memory_type(
@@ -2144,7 +2136,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
 
     if (mem_type == UINT32_MAX) {
         NE_LOG_ERROR("failed to find device-local memory type for buffer");
-        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        vkDestroyBuffer(renderer->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
         slot->occupied = false;
         renderer->buffers.count--;
@@ -2158,10 +2150,10 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     alloc_info.allocationSize = mem_req.size;
     alloc_info.memoryTypeIndex = mem_type;
 
-    vr = renderer->fns.vkAllocateMemory(renderer->device, &alloc_info, NULL, &slot->memory);
+    vr = vkAllocateMemory(renderer->device, &alloc_info, NULL, &slot->memory);
     if (vr != VK_SUCCESS || slot->memory == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkAllocateMemory failed (vr=%d)", (int)vr);
-        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        vkDestroyBuffer(renderer->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
         slot->occupied = false;
         renderer->buffers.count--;
@@ -2169,12 +2161,12 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     }
 
     /* Bind memory to buffer */
-    vr = renderer->fns.vkBindBufferMemory(renderer->device, slot->buffer, slot->memory, 0);
+    vr = vkBindBufferMemory(renderer->device, slot->buffer, slot->memory, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBindBufferMemory failed (vr=%d)", (int)vr);
-        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+        vkFreeMemory(renderer->device, slot->memory, NULL);
         slot->memory = VK_NULL_HANDLE;
-        renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+        vkDestroyBuffer(renderer->device, slot->buffer, NULL);
         slot->buffer = VK_NULL_HANDLE;
         slot->occupied = false;
         renderer->buffers.count--;
@@ -2185,9 +2177,9 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
     if (desc->initial_data) {
         if (!ne_vk_ensure_staging_buffer(renderer, desc->size)) {
             NE_LOG_ERROR("failed to ensure staging buffer for initial data");
-            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
             renderer->buffers.count--;
@@ -2203,12 +2195,12 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+        vr = vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
-            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
             renderer->buffers.count--;
@@ -2222,14 +2214,14 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         copy_region.dstOffset = 0;
         copy_region.size = desc->size;
 
-        renderer->fns.vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
+        vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
 
         /* Submit and wait for completion */
         if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
             NE_LOG_ERROR("failed to submit transfer command for initial data");
-            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyBuffer(renderer->device, slot->buffer, NULL);
+            vkDestroyBuffer(renderer->device, slot->buffer, NULL);
             slot->buffer = VK_NULL_HANDLE;
             slot->occupied = false;
             renderer->buffers.count--;
@@ -2237,7 +2229,7 @@ NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) 
         }
 
         /* Reset the command buffer for reuse */
-        vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+        vr = vkResetCommandBuffer(renderer->transfer_cmd, 0);
         if (vr != VK_SUCCESS) {
             NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
         }
@@ -2295,7 +2287,7 @@ static void ne_cmd_transition_image_layout(const NERenderer *renderer, const VkC
         return;
     }
 
-    renderer->fns.vkCmdPipelineBarrier(
+    vkCmdPipelineBarrier(
         cmd,
         sourceStage, destinationStage,
         0,
@@ -2327,7 +2319,7 @@ static void ne_cmd_copy_buffer_to_image(const NERenderer *renderer, const VkComm
     copy_region.imageOffset = (VkOffset3D){0, 0, 0};
     copy_region.imageExtent = (VkExtent3D){slot->width, slot->height, 1};
 
-    renderer->fns.vkCmdCopyBufferToImage(cmd, buffer, slot->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+    vkCmdCopyBufferToImage(cmd, buffer, slot->image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 }
 
 NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
@@ -2388,7 +2380,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     img_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
     img_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
-    VkResult vr = renderer->fns.vkCreateImage(renderer->device, &img_info, NULL, &slot->image);
+    VkResult vr = vkCreateImage(renderer->device, &img_info, NULL, &slot->image);
     if (vr != VK_SUCCESS || slot->image == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateImage failed (vr=%d, size=%u)", (int)vr, size);
         slot->occupied = false;
@@ -2398,7 +2390,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
 
     /* Get memory requirements for the buffer */
     VkMemoryRequirements mem_req;
-    renderer->fns.vkGetImageMemoryRequirements(renderer->device, slot->image, &mem_req);
+    vkGetImageMemoryRequirements(renderer->device, slot->image, &mem_req);
 
     /* Find device-local memory for the GPU buffer */
     uint32_t mem_type = ne_vk_find_memory_type(
@@ -2409,7 +2401,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
 
     if (mem_type == UINT32_MAX) {
         NE_LOG_ERROR("failed to find device-local memory type for buffer");
-        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
         renderer->buffers.count--;
@@ -2423,10 +2415,10 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     alloc_info.allocationSize = mem_req.size;
     alloc_info.memoryTypeIndex = mem_type;
 
-    vr = renderer->fns.vkAllocateMemory(renderer->device, &alloc_info, NULL, &slot->memory);
+    vr = vkAllocateMemory(renderer->device, &alloc_info, NULL, &slot->memory);
     if (vr != VK_SUCCESS || slot->memory == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkAllocateMemory failed (vr=%d)", (int)vr);
-        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
         renderer->buffers.count--;
@@ -2434,12 +2426,12 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     }
 
     /* Bind memory to buffer */
-    vr = renderer->fns.vkBindImageMemory(renderer->device, slot->image, slot->memory, 0);
+    vr = vkBindImageMemory(renderer->device, slot->image, slot->memory, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBindBufferMemory failed (vr=%d)", (int)vr);
-        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+        vkFreeMemory(renderer->device, slot->memory, NULL);
         slot->memory = VK_NULL_HANDLE;
-        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+        vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
         slot->occupied = false;
         renderer->buffers.count--;
@@ -2450,9 +2442,9 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
     if (desc->initial_data) {
         if (!ne_vk_ensure_staging_buffer(renderer, size)) {
             NE_LOG_ERROR("failed to ensure staging buffer for initial data");
-            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+            vkDestroyImage(renderer->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
             renderer->buffers.count--;
@@ -2468,12 +2460,12 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
         begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-        vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+        vr = vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
         if (vr != VK_SUCCESS) {
             NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
-            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+            vkDestroyImage(renderer->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
             renderer->buffers.count--;
@@ -2486,9 +2478,9 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         /* Submit and wait for completion */
         if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
             NE_LOG_ERROR("failed to submit transfer command for initial data");
-            renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+            vkFreeMemory(renderer->device, slot->memory, NULL);
             slot->memory = VK_NULL_HANDLE;
-            renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+            vkDestroyImage(renderer->device, slot->image, NULL);
             slot->image = VK_NULL_HANDLE;
             slot->occupied = false;
             renderer->buffers.count--;
@@ -2496,7 +2488,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         }
 
         /* Reset the command buffer for reuse */
-        vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+        vr = vkResetCommandBuffer(renderer->transfer_cmd, 0);
         if (vr != VK_SUCCESS) {
             NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
         }
@@ -2516,7 +2508,7 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
         viewInfo.subresourceRange.baseArrayLayer = 0;
         viewInfo.subresourceRange.layerCount = 1;
 
-        vr = renderer->fns.vkCreateImageView(renderer->device, &viewInfo, nullptr, &slot->imageView);
+        vr = vkCreateImageView(renderer->device, &viewInfo, nullptr, &slot->imageView);
         if (vr != VK_SUCCESS) {
             NE_LOG_WARN("vkCreateImageView failed (vr=%d), continuing anyway", (int)vr);
         }
@@ -2559,7 +2551,7 @@ void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *dat
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    VkResult vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+    VkResult vr = vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
         return;
@@ -2575,7 +2567,7 @@ void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *dat
     }
 
     /* Reset the command buffer for reuse */
-    vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+    vr = vkResetCommandBuffer(renderer->transfer_cmd, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
     }
@@ -2636,7 +2628,7 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     begin_info.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 
-    VkResult vr = renderer->fns.vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
+    VkResult vr = vkBeginCommandBuffer(renderer->transfer_cmd, &begin_info);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkBeginCommandBuffer (transfer) failed (vr=%d)", (int)vr);
         return;
@@ -2648,14 +2640,14 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     copy_region.dstOffset = offset;
     copy_region.size = size;
 
-    renderer->fns.vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
+    vkCmdCopyBuffer(renderer->transfer_cmd, renderer->staging_buffer, slot->buffer, 1, &copy_region);
 
     if (!ne_vk_submit_transfer_cmd(renderer, renderer->transfer_cmd)) {
         NE_LOG_ERROR("failed to submit transfer command for buffer update");
         return;
     }
 
-    vr = renderer->fns.vkResetCommandBuffer(renderer->transfer_cmd, 0);
+    vr = vkResetCommandBuffer(renderer->transfer_cmd, 0);
     if (vr != VK_SUCCESS) {
         NE_LOG_WARN("vkResetCommandBuffer (transfer) failed (vr=%d), continuing anyway", (int)vr);
     }
@@ -2678,18 +2670,18 @@ void ne_image_destroy(NERenderer *renderer, NEImageHandle handle) {
         return;
     }
 
-    if (slot->image != VK_NULL_HANDLE && renderer->fns.vkDestroyImage) {
-        renderer->fns.vkDestroyImage(renderer->device, slot->image, NULL);
+    if (slot->image != VK_NULL_HANDLE && vkDestroyImage) {
+        vkDestroyImage(renderer->device, slot->image, NULL);
         slot->image = VK_NULL_HANDLE;
     }
 
-    if (slot->imageView != VK_NULL_HANDLE && renderer->fns.vkDestroyImageView) {
-        renderer->fns.vkDestroyImageView(renderer->device, slot->imageView, NULL);
+    if (slot->imageView != VK_NULL_HANDLE && vkDestroyImageView) {
+        vkDestroyImageView(renderer->device, slot->imageView, NULL);
         slot->imageView = VK_NULL_HANDLE;
     }
 
-    if (slot->memory != VK_NULL_HANDLE && renderer->fns.vkFreeMemory) {
-        renderer->fns.vkFreeMemory(renderer->device, slot->memory, NULL);
+    if (slot->memory != VK_NULL_HANDLE && vkFreeMemory) {
+        vkFreeMemory(renderer->device, slot->memory, NULL);
         slot->memory = VK_NULL_HANDLE;
     }
 
@@ -2769,7 +2761,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
     smci.pCode    = (const uint32_t *)desc->bytecode;
 
     VkShaderModule module = VK_NULL_HANDLE;
-    const VkResult vr = renderer->fns.vkCreateShaderModule(renderer->device, &smci, NULL, &module);
+    const VkResult vr = vkCreateShaderModule(renderer->device, &smci, NULL, &module);
     if (vr != VK_SUCCESS || module == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateShaderModule failed (vr=%d)", (int)vr);
         return NE_SHADER_HANDLE_NULL;
@@ -2779,7 +2771,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_shader_create: shader pool allocation failed");
-        renderer->fns.vkDestroyShaderModule(renderer->device, module, NULL);
+        vkDestroyShaderModule(renderer->device, module, NULL);
         return NE_SHADER_HANDLE_NULL;
     }
 
@@ -2790,7 +2782,7 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) 
 
     if (!slot->entry_point) {
         NE_LOG_ERROR("ne_shader_create: out of memory copying entry point name");
-        renderer->fns.vkDestroyShaderModule(renderer->device, module, NULL);
+        vkDestroyShaderModule(renderer->device, module, NULL);
         slot->occupied = false;
         renderer->shaders.count--;
         slot->module   = VK_NULL_HANDLE;
@@ -3099,7 +3091,7 @@ static bool ne_vk_pipeline_compile(NERenderer *r, NEVulkanPipelineSlot *slot,
     gpci.renderPass          = render_pass;
     gpci.subpass             = 0;
 
-    VkResult vr = r->fns.vkCreateGraphicsPipelines(
+    VkResult vr = vkCreateGraphicsPipelines(
         r->device, VK_NULL_HANDLE, 1, &gpci, NULL, &slot->pipeline);
     if (vr != VK_SUCCESS || slot->pipeline == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreateGraphicsPipelines failed (vr=%d)", (int)vr);
@@ -3222,7 +3214,7 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
     plci.pPushConstantRanges    = &push_range;
 
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VkResult vr = renderer->fns.vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
+    VkResult vr = vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
     if (vr != VK_SUCCESS || layout == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreatePipelineLayout failed (vr=%d)", (int)vr);
         free(bindings);
@@ -3236,7 +3228,7 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_pipeline_create: pipeline pool allocation failed");
-        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        vkDestroyPipelineLayout(renderer->device, layout, NULL);
         free(bindings);
         free(attributes);
         return NE_PIPELINE_HANDLE_NULL;
@@ -3255,7 +3247,7 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
 
     if (!slot->vert_entry || !slot->frag_entry) {
         NE_LOG_ERROR("ne_pipeline_create: out of memory copying entry point names");
-        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        vkDestroyPipelineLayout(renderer->device, layout, NULL);
         free(slot->vert_entry);
         free(slot->frag_entry);
         free(bindings);
@@ -3296,26 +3288,26 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index];
 
     /* Ensure the GPU is done with any command buffers referencing this pipeline. */
-    if (renderer->device != VK_NULL_HANDLE && renderer->fns.vkDeviceWaitIdle) {
-        (void)renderer->fns.vkDeviceWaitIdle(renderer->device);
+    if (renderer->device != VK_NULL_HANDLE && vkDeviceWaitIdle) {
+        (void)vkDeviceWaitIdle(renderer->device);
     }
 
-    if (slot->pipeline != VK_NULL_HANDLE && renderer->fns.vkDestroyPipeline) {
-        renderer->fns.vkDestroyPipeline(renderer->device, slot->pipeline, NULL);
+    if (slot->pipeline != VK_NULL_HANDLE && vkDestroyPipeline) {
+        vkDestroyPipeline(renderer->device, slot->pipeline, NULL);
         slot->pipeline = VK_NULL_HANDLE;
     }
 
-    if (slot->layout != VK_NULL_HANDLE && renderer->fns.vkDestroyPipelineLayout) {
-        renderer->fns.vkDestroyPipelineLayout(renderer->device, slot->layout, NULL);
+    if (slot->layout != VK_NULL_HANDLE && vkDestroyPipelineLayout) {
+        vkDestroyPipelineLayout(renderer->device, slot->layout, NULL);
         slot->layout = VK_NULL_HANDLE;
     }
 
-    if (slot->vert_module != VK_NULL_HANDLE && renderer->fns.vkDestroyShaderModule) {
-        renderer->fns.vkDestroyShaderModule(renderer->device, slot->vert_module, NULL);
+    if (slot->vert_module != VK_NULL_HANDLE && vkDestroyShaderModule) {
+        vkDestroyShaderModule(renderer->device, slot->vert_module, NULL);
         slot->vert_module = VK_NULL_HANDLE;
     }
-    if (slot->frag_module != VK_NULL_HANDLE && renderer->fns.vkDestroyShaderModule) {
-        renderer->fns.vkDestroyShaderModule(renderer->device, slot->frag_module, NULL);
+    if (slot->frag_module != VK_NULL_HANDLE && vkDestroyShaderModule) {
+        vkDestroyShaderModule(renderer->device, slot->frag_module, NULL);
         slot->frag_module = VK_NULL_HANDLE;
     }
 
@@ -3376,7 +3368,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
     plci.pPushConstantRanges    = &push_range;
 
     VkPipelineLayout layout = VK_NULL_HANDLE;
-    VkResult vr = renderer->fns.vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
+    VkResult vr = vkCreatePipelineLayout(renderer->device, &plci, NULL, &layout);
     if (vr != VK_SUCCESS || layout == VK_NULL_HANDLE) {
         NE_LOG_ERROR("vkCreatePipelineLayout failed (vr=%d)", (int)vr);
         return NE_COMPUTE_PIPELINE_HANDLE_NULL;
@@ -3387,7 +3379,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
 
     if (slot_index == UINT32_MAX) {
         NE_LOG_ERROR("ne_compute_pipeline_create: pipeline pool allocation failed");
-        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        vkDestroyPipelineLayout(renderer->device, layout, NULL);
         return NE_COMPUTE_PIPELINE_HANDLE_NULL;
     }
 
@@ -3402,7 +3394,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer,
 
     if (!slot->compute_entry){
         NE_LOG_ERROR("ne_compute_pipeline_create: out of memory copying entry point names");
-        renderer->fns.vkDestroyPipelineLayout(renderer->device, layout, NULL);
+        vkDestroyPipelineLayout(renderer->device, layout, NULL);
         free(slot->compute_entry);
         slot->occupied = false;
         renderer->pipelines.count--;
@@ -3455,7 +3447,7 @@ void ne_render_pass_set_pipeline(NERenderPass *pass, NEPipelineHandle pipeline) 
         return;
     }
 
-    r->fns.vkCmdBindPipeline(pass->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, slot->pipeline);
+    vkCmdBindPipeline(pass->cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, slot->pipeline);
     pass->bound_layout = slot->layout;
 }
 
@@ -3480,7 +3472,7 @@ void ne_render_pass_set_vertex_buffer(NERenderPass *pass, uint64_t slot,
     VkBuffer vk_buffer = ne_vk_buffer_for_frame(&((NEVulkanBufferSlot*)r->buffers.slots)[buf_index], pass->surface->sc.frame_index);
     VkDeviceSize offset = 0;
 
-    r->fns.vkCmdBindVertexBuffers(pass->cmd, slot, 1, &vk_buffer, &offset);
+    vkCmdBindVertexBuffers(pass->cmd, slot, 1, &vk_buffer, &offset);
 }
 
 void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
@@ -3504,7 +3496,7 @@ void ne_render_pass_set_index_buffer(NERenderPass *pass, NEBufferHandle buffer,
     VkIndexType vk_type = (type == NE_INDEX_TYPE_UINT32) ? VK_INDEX_TYPE_UINT32
                                                          : VK_INDEX_TYPE_UINT16;
 
-    r->fns.vkCmdBindIndexBuffer(pass->cmd, vk_buffer, 0, vk_type);
+    vkCmdBindIndexBuffer(pass->cmd, vk_buffer, 0, vk_type);
 }
 
 void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, uint64_t slot, const void *data, size_t size) {
@@ -3543,7 +3535,7 @@ void ne_render_pass_set_uniform_data(NERenderPass *pass, NEShaderStage stage, ui
                     "minimum (128 bytes)", (unsigned)size);
     }
 
-    r->fns.vkCmdPushConstants(pass->cmd, pass->bound_layout, stage_flags, 0, size, data);
+    vkCmdPushConstants(pass->cmd, pass->bound_layout, stage_flags, 0, size, data);
 }
 
 void ne_render_pass_update_buffer(NERenderPass *pass, NEBufferHandle handle,
@@ -3590,8 +3582,7 @@ void ne_render_pass_draw(NERenderPass *pass, uint64_t first_vertex, uint64_t ver
         return;
     }
 
-    NERenderer *r = pass->surface->renderer;
-    r->fns.vkCmdDraw(pass->cmd, vertex_count, 1, first_vertex, 0);
+    vkCmdDraw(pass->cmd, vertex_count, 1, first_vertex, 0);
 }
 
 void ne_render_pass_draw_indexed(NERenderPass *pass, uint64_t index_count,
@@ -3600,8 +3591,7 @@ void ne_render_pass_draw_indexed(NERenderPass *pass, uint64_t index_count,
         return;
     }
 
-    NERenderer *r = pass->surface->renderer;
-    r->fns.vkCmdDrawIndexed(pass->cmd, index_count, 1, first_index, vertex_offset, 0);
+    vkCmdDrawIndexed(pass->cmd, index_count, 1, first_index, vertex_offset, 0);
 }
 
 /* ========================================================================
