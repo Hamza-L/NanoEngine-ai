@@ -1219,11 +1219,11 @@ static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
         image_count = caps.maxImageCount;
     }
 
-    VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
+    VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
     if ((caps.supportedCompositeAlpha & composite_alpha) == 0) {
-        /* Pick the first supported bit. */
-        const VkCompositeAlphaFlagBitsKHR candidates[] = {VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR, VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR,
-                                                          VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR, VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR};
+        const VkCompositeAlphaFlagBitsKHR candidates[] = {VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
+                                                          VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
+                                                          VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR};
         for (uint32_t i = 0; i < (uint32_t)(sizeof(candidates) / sizeof(candidates[0])); i++) {
             if (caps.supportedCompositeAlpha & candidates[i]) {
                 composite_alpha = candidates[i];
