@@ -17,10 +17,13 @@ OBJ_EXT := obj
 # --- Sources --------------------------------------------------------------
 SRC_C += src/platform/win32/window_win32.c
 SRC_C += src/renderer/vulkan/ne_renderer_vulkan.c
+SRC_C += src/renderer/vulkan/ne_swapchain_vulkan_wsi.c
+SRC_C += src/renderer/vulkan/ne_swapchain_dxgi.c
 
 # --- Compile flags --------------------------------------------------------
 CFLAGS += -D_CRT_SECURE_NO_WARNINGS
 CFLAGS += -DUNICODE -D_UNICODE
+CFLAGS += -Isrc/renderer/vulkan
 
 SHADERS_DIR := $(BUILD_DIR)/shaders
 
@@ -33,6 +36,8 @@ LDFLAGS += -link
 LDFLAGS += user32.lib
 LDFLAGS += gdi32.lib
 LDFLAGS += dwmapi.lib
+LDFLAGS += d3d11.lib
+LDFLAGS += dxgi.lib
 
 LDASANFLAGS := clang_rt.asan-x86_64.lib
 

@@ -25,119 +25,121 @@
 #include "glslang_c_interface.h"
 #include "../Public/resource_limits_c.h"
 
+#include "ne_swapchain.h"
+
 #include <stdbool.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
 /* Global */
-static PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
-static PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
+PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
+PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
 
 /* Instance */
-static PFN_vkCreateInstance vkCreateInstance;
-static PFN_vkDestroyInstance vkDestroyInstance;
-static PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
-static PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties;
-static PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
-static PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
-static PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
+PFN_vkCreateInstance vkCreateInstance;
+PFN_vkDestroyInstance vkDestroyInstance;
+PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
+PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties;
+PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
+PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
+PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
 
-static PFN_vkCreateDevice vkCreateDevice;
+PFN_vkCreateDevice vkCreateDevice;
 
-static PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
-static PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
-static PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
-static PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
+PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
+PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
+PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
+PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
 
-static PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
-static PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
+PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
+PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
 
 /* Device */
-static PFN_vkDestroyDevice vkDestroyDevice;
-static PFN_vkGetDeviceQueue vkGetDeviceQueue;
-static PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
+PFN_vkDestroyDevice vkDestroyDevice;
+PFN_vkGetDeviceQueue vkGetDeviceQueue;
+PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
 
-static PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
-static PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
-static PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
-static PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
+PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
+PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
+PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
+PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
 
-static PFN_vkQueueSubmit vkQueueSubmit;
-static PFN_vkQueuePresentKHR vkQueuePresentKHR;
-static PFN_vkQueueWaitIdle vkQueueWaitIdle;
+PFN_vkQueueSubmit vkQueueSubmit;
+PFN_vkQueuePresentKHR vkQueuePresentKHR;
+PFN_vkQueueWaitIdle vkQueueWaitIdle;
 
-static PFN_vkCreateSemaphore vkCreateSemaphore;
-static PFN_vkDestroySemaphore vkDestroySemaphore;
-static PFN_vkCreateFence vkCreateFence;
-static PFN_vkDestroyFence vkDestroyFence;
-static PFN_vkWaitForFences vkWaitForFences;
-static PFN_vkResetFences vkResetFences;
+PFN_vkCreateSemaphore vkCreateSemaphore;
+PFN_vkDestroySemaphore vkDestroySemaphore;
+PFN_vkCreateFence vkCreateFence;
+PFN_vkDestroyFence vkDestroyFence;
+PFN_vkWaitForFences vkWaitForFences;
+PFN_vkResetFences vkResetFences;
 
-static PFN_vkCreateCommandPool vkCreateCommandPool;
-static PFN_vkDestroyCommandPool vkDestroyCommandPool;
-static PFN_vkResetCommandPool vkResetCommandPool;
-static PFN_vkResetCommandBuffer vkResetCommandBuffer;
-static PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
-static PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
+PFN_vkCreateCommandPool vkCreateCommandPool;
+PFN_vkDestroyCommandPool vkDestroyCommandPool;
+PFN_vkResetCommandPool vkResetCommandPool;
+PFN_vkResetCommandBuffer vkResetCommandBuffer;
+PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
+PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
 
-static PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
-static PFN_vkEndCommandBuffer vkEndCommandBuffer;
-static PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
-static PFN_vkCmdClearColorImage vkCmdClearColorImage;
+PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
+PFN_vkEndCommandBuffer vkEndCommandBuffer;
+PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
+PFN_vkCmdClearColorImage vkCmdClearColorImage;
 
 /* Buffer management */
-static PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
-static PFN_vkCreateBuffer vkCreateBuffer;
-static PFN_vkDestroyBuffer vkDestroyBuffer;
-static PFN_vkCreateImage vkCreateImage;
-static PFN_vkDestroyImage vkDestroyImage;
-static PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
-static PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
-static PFN_vkAllocateMemory vkAllocateMemory;
-static PFN_vkFreeMemory vkFreeMemory;
-static PFN_vkBindBufferMemory vkBindBufferMemory;
-static PFN_vkBindImageMemory vkBindImageMemory;
-static PFN_vkMapMemory vkMapMemory;
-static PFN_vkUnmapMemory vkUnmapMemory;
-static PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
-static PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
-static PFN_vkCmdCopyImage vkCmdCopyImage;
-static PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
+PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
+PFN_vkCreateBuffer vkCreateBuffer;
+PFN_vkDestroyBuffer vkDestroyBuffer;
+PFN_vkCreateImage vkCreateImage;
+PFN_vkDestroyImage vkDestroyImage;
+PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
+PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
+PFN_vkAllocateMemory vkAllocateMemory;
+PFN_vkFreeMemory vkFreeMemory;
+PFN_vkBindBufferMemory vkBindBufferMemory;
+PFN_vkBindImageMemory vkBindImageMemory;
+PFN_vkMapMemory vkMapMemory;
+PFN_vkUnmapMemory vkUnmapMemory;
+PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
+PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
+PFN_vkCmdCopyImage vkCmdCopyImage;
+PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
 
 /* Shader management */
-static PFN_vkCreateShaderModule vkCreateShaderModule;
-static PFN_vkDestroyShaderModule vkDestroyShaderModule;
+PFN_vkCreateShaderModule vkCreateShaderModule;
+PFN_vkDestroyShaderModule vkDestroyShaderModule;
 
 /* Render pass */
-static PFN_vkCreateRenderPass vkCreateRenderPass;
-static PFN_vkDestroyRenderPass vkDestroyRenderPass;
+PFN_vkCreateRenderPass vkCreateRenderPass;
+PFN_vkDestroyRenderPass vkDestroyRenderPass;
 
 /* Image views */
-static PFN_vkCreateImageView vkCreateImageView;
-static PFN_vkDestroyImageView vkDestroyImageView;
+PFN_vkCreateImageView vkCreateImageView;
+PFN_vkDestroyImageView vkDestroyImageView;
 
 /* Framebuffers */
-static PFN_vkCreateFramebuffer vkCreateFramebuffer;
-static PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
+PFN_vkCreateFramebuffer vkCreateFramebuffer;
+PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
 
 /* Pipeline */
-static PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
-static PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
-static PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
-static PFN_vkDestroyPipeline vkDestroyPipeline;
+PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
+PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
+PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
+PFN_vkDestroyPipeline vkDestroyPipeline;
 
 /* Render pass commands */
-static PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
-static PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
-static PFN_vkCmdBindPipeline vkCmdBindPipeline;
-static PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers;
-static PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
-static PFN_vkCmdSetViewport vkCmdSetViewport;
-static PFN_vkCmdSetScissor vkCmdSetScissor;
-static PFN_vkCmdDraw vkCmdDraw;
-static PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
-static PFN_vkCmdPushConstants vkCmdPushConstants;
+PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
+PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
+PFN_vkCmdBindPipeline vkCmdBindPipeline;
+PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers;
+PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
+PFN_vkCmdSetViewport vkCmdSetViewport;
+PFN_vkCmdSetScissor vkCmdSetScissor;
+PFN_vkCmdDraw vkCmdDraw;
+PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
+PFN_vkCmdPushConstants vkCmdPushConstants;
 
 enum {
     NE_VK_MAX_FRAMES_IN_FLIGHT = 2,
@@ -224,22 +226,9 @@ typedef struct NEVulkanPipelineSlot {
     VkPipeline pipeline;
 } NEVulkanPipelineSlot;
 
-typedef struct NESwapchain {
-    VkSwapchainKHR swapchain;
-    VkFormat format;
-    VkColorSpaceKHR color_space;
-    VkExtent2D extent;
-
-    VkImage *images;
-    VkImageView *image_views;
-    VkFramebuffer *framebuffers;
-    uint32_t image_count;
-
-    VkFence *images_in_flight;
-    VkSemaphore *sem_render_finished;
-
-    uint32_t acquired_image_index;
-} NESwapchain;
+/* Forward declare accessors from ne_swapchain_vulkan_wsi.c */
+VkFence *ne_swapchain_vulkan_wsi_get_images_in_flight(NESwapchainI *iface);
+VkSemaphore ne_swapchain_vulkan_wsi_get_render_finished_sem(NESwapchainI *iface, uint32_t image_index);
 
 struct NERenderer {
     HMODULE vulkan_lib;
@@ -284,8 +273,11 @@ struct NERenderSurface {
     NEWindow *window;
 
     VkSurfaceKHR surface;
-    NESwapchain sc;
+    NESwapchainI *swapchain;
+    NEPresentBackend present_backend;
     VkRenderPass render_pass;
+    VkFramebuffer *framebuffers;
+    uint32_t framebuffer_count;
 
     VkCommandPool cmd_pool;
     VkCommandBuffer cmds[NE_VK_MAX_FRAMES_IN_FLIGHT];
@@ -293,7 +285,6 @@ struct NERenderSurface {
     VkFence fences_in_flight[NE_VK_MAX_FRAMES_IN_FLIGHT];
     uint32_t frame_index;
 
-    bool wants_swapchain_recreate;
     bool vsync;
 
     float clear_color[4];
@@ -556,14 +547,17 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     qci.queueCount = 1;
     qci.pQueuePriorities = &prio;
 
-    const char *device_exts[] = {VK_KHR_SWAPCHAIN_EXTENSION_NAME};
+    const char *device_exts[] = {
+        VK_KHR_SWAPCHAIN_EXTENSION_NAME,
+        VK_KHR_EXTERNAL_MEMORY_WIN32_EXTENSION_NAME,
+    };
 
     VkDeviceCreateInfo dci;
     memset(&dci, 0, sizeof(dci));
     dci.sType = VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO;
     dci.queueCreateInfoCount = 1;
     dci.pQueueCreateInfos = &qci;
-    dci.enabledExtensionCount = 1;
+    dci.enabledExtensionCount = sizeof(device_exts) / sizeof(device_exts[0]);
     dci.ppEnabledExtensionNames = device_exts;
 
     VkDevice device = VK_NULL_HANDLE;
@@ -636,58 +630,51 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     return true;
 }
 
-static void ne_vk_swapchain_cleanup(NERenderer *r, NESwapchain *sc) {
-    if (!r || !sc) {
-        return;
-    }
+/* ── Framebuffer helpers ───────────────────────────────────────────────── */
 
-    if (sc->framebuffers) {
-        for (uint32_t i = 0; i < sc->image_count; i++) {
-            if (sc->framebuffers[i] != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(r->device, sc->framebuffers[i], NULL);
+static void ne_vk_destroy_framebuffers(NERenderSurface *surface) {
+    NERenderer *r = surface->renderer;
+    if (surface->framebuffers) {
+        for (uint32_t i = 0; i < surface->framebuffer_count; i++) {
+            if (surface->framebuffers[i] != VK_NULL_HANDLE) {
+                vkDestroyFramebuffer(r->device, surface->framebuffers[i], NULL);
             }
         }
-        free(sc->framebuffers);
-        sc->framebuffers = NULL;
+        free(surface->framebuffers);
+        surface->framebuffers = NULL;
+        surface->framebuffer_count = 0;
     }
+}
 
-    if (sc->image_views) {
-        for (uint32_t i = 0; i < sc->image_count; i++) {
-            if (sc->image_views[i] != VK_NULL_HANDLE) {
-                vkDestroyImageView(r->device, sc->image_views[i], NULL);
-            }
+static bool ne_vk_build_framebuffers(NERenderSurface *surface) {
+    NERenderer *r = surface->renderer;
+    NESwapchainI *sc = surface->swapchain;
+
+    ne_vk_destroy_framebuffers(surface);
+
+    surface->framebuffers = (VkFramebuffer *)calloc(sc->image_count, sizeof(VkFramebuffer));
+    if (!surface->framebuffers) return false;
+    surface->framebuffer_count = sc->image_count;
+
+    for (uint32_t i = 0; i < sc->image_count; i++) {
+        VkFramebufferCreateInfo fbci;
+        memset(&fbci, 0, sizeof(fbci));
+        fbci.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+        fbci.renderPass = surface->render_pass;
+        fbci.attachmentCount = 1;
+        fbci.pAttachments = &sc->image_views[i];
+        fbci.width = sc->extent.width;
+        fbci.height = sc->extent.height;
+        fbci.layers = 1;
+
+        VkResult vr = vkCreateFramebuffer(r->device, &fbci, NULL, &surface->framebuffers[i]);
+        if (vr != VK_SUCCESS) {
+            NE_LOG_ERROR("vkCreateFramebuffer[%u] failed (vr=%d)", (unsigned)i, (int)vr);
+            return false;
         }
-        free(sc->image_views);
-        sc->image_views = NULL;
     }
 
-    if (sc->sem_render_finished) {
-        for (uint32_t i = 0; i < sc->image_count; i++) {
-            if (sc->sem_render_finished[i] != VK_NULL_HANDLE) {
-                vkDestroySemaphore(r->device, sc->sem_render_finished[i], NULL);
-            }
-        }
-        free(sc->sem_render_finished);
-        sc->sem_render_finished = NULL;
-    }
-
-    free(sc->images_in_flight);
-    sc->images_in_flight = NULL;
-
-    if (sc->swapchain != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(r->device, sc->swapchain, NULL);
-        sc->swapchain = VK_NULL_HANDLE;
-    }
-
-    free(sc->images);
-    sc->images = NULL;
-    sc->image_count = 0;
-
-    sc->format = VK_FORMAT_UNDEFINED;
-    sc->color_space = (VkColorSpaceKHR)0;
-    sc->extent.width = 0;
-    sc->extent.height = 0;
-    sc->acquired_image_index = 0;
+    return true;
 }
 
 static bool ne_vk_surface_init(NERenderSurface *surface, NERenderer *r,
@@ -696,15 +683,17 @@ static bool ne_vk_surface_init(NERenderSurface *surface, NERenderer *r,
     surface->renderer = r;
     surface->window = window;
     surface->surface = vk_surface;
-    surface->wants_swapchain_recreate = true;
+    surface->swapchain = NULL;
     surface->vsync = true;
 
+    surface->present_backend = NE_PRESENT_BACKEND_DEFAULT;
     surface->clear_color[0] = 0.1f;
     surface->clear_color[1] = 0.1f;
     surface->clear_color[2] = 0.2f;
     surface->clear_color[3] = 1.0f;
     if (desc) {
         surface->vsync = desc->vsync;
+        surface->present_backend = desc->present_backend;
         memcpy(surface->clear_color, desc->clear_color_rgba, sizeof(surface->clear_color));
     }
 
@@ -766,58 +755,7 @@ static bool ne_vk_surface_init(NERenderSurface *surface, NERenderer *r,
     return true;
 }
 
-static VkSurfaceFormatKHR ne_vk_choose_surface_format(const VkSurfaceFormatKHR *formats, uint32_t count) {
-    /* If the surface has no preferred format, pick a reasonable default. */
-    if (count == 1 && formats[0].format == VK_FORMAT_UNDEFINED) {
-        VkSurfaceFormatKHR out = {VK_FORMAT_B8G8R8A8_UNORM, VK_COLOR_SPACE_SRGB_NONLINEAR_KHR};
-        return out;
-    }
-
-    /* Prefer BGRA8 UNORM if available (common on Windows). */
-    for (uint32_t i = 0; i < count; i++) {
-        if (formats[i].format == VK_FORMAT_B8G8R8A8_UNORM) {
-            return formats[i];
-        }
-    }
-
-    return formats[0];
-}
-
-static VkPresentModeKHR ne_vk_choose_present_mode(const VkPresentModeKHR *modes, uint32_t count, bool vsync) {
-    /*
-     * FIFO is the only present mode the spec guarantees is supported, and it is
-     * vsync-paced (presents are released on vblank). It is therefore both the
-     * vsync choice and the universal fallback.
-     *
-     * When vsync is disabled we prefer MAILBOX (low-latency, no tearing) then
-     * IMMEDIATE (uncapped, may tear) — but only if the driver actually offers
-     * them; otherwise we fall back to FIFO.
-     */
-    if (!vsync) {
-        for (uint32_t i = 0; i < count; i++) {
-            if (modes[i] == VK_PRESENT_MODE_MAILBOX_KHR) {
-                return VK_PRESENT_MODE_MAILBOX_KHR;
-            }
-        }
-        for (uint32_t i = 0; i < count; i++) {
-            if (modes[i] == VK_PRESENT_MODE_IMMEDIATE_KHR) {
-                return VK_PRESENT_MODE_IMMEDIATE_KHR;
-            }
-        }
-    }
-
-    return VK_PRESENT_MODE_FIFO_KHR;
-}
-
-static uint32_t ne_vk_clamp_u32(uint32_t v, uint32_t minv, uint32_t maxv) {
-    if (v < minv) {
-        return minv;
-    }
-    if (v > maxv) {
-        return maxv;
-    }
-    return v;
-}
+/* (Surface format / present mode / clamp helpers moved to ne_swapchain_vulkan_wsi.c) */
 
 /* ── Buffer helpers ────────────────────────────────────────────────────── */
 
@@ -1070,312 +1008,67 @@ static bool ne_vk_create_render_pass(NERenderSurface *surface, VkFormat format) 
     return true;
 }
 
-static bool ne_vk_swapchain_create(NERenderSurface *surface, bool vsync) {
-    if (!surface || !surface->renderer) {
-        return false;
-    }
-
+/**
+ * Create (or recreate) the swapchain via the abstraction layer and rebuild
+ * framebuffers. Handles both initial creation and resize.
+ */
+static bool ne_vk_surface_ensure_swapchain(NERenderSurface *surface) {
     NERenderer *r = surface->renderer;
 
-    vkDeviceWaitIdle(r->device);
+    if (surface->swapchain) {
+        ne_vk_destroy_framebuffers(surface);
 
-    int32_t fb_w = 0;
-    int32_t fb_h = 0;
-    if (!ne_window_get_framebuffer_size(surface->window, &fb_w, &fb_h)) {
-        return false;
-    }
-    if (fb_w <= 0 || fb_h <= 0) {
-        return false;
-    }
-
-    if (!ne_vk_pick_device_and_queue(r, surface->surface)) {
-        return false;
-    }
-
-    /* Destroy old swapchain-dependent resources (except the swapchain handle itself). */
-    if (surface->sc.framebuffers) {
-        for (uint32_t i = 0; i < surface->sc.image_count; i++) {
-            if (surface->sc.framebuffers[i] != VK_NULL_HANDLE) {
-                vkDestroyFramebuffer(r->device, surface->sc.framebuffers[i], NULL);
-            }
+        if (!surface->swapchain->ops->recreate(surface->swapchain)) {
+            return false;
         }
-        free(surface->sc.framebuffers);
-        surface->sc.framebuffers = NULL;
-    }
-
-    if (surface->sc.image_views) {
-        for (uint32_t i = 0; i < surface->sc.image_count; i++) {
-            if (surface->sc.image_views[i] != VK_NULL_HANDLE) {
-                vkDestroyImageView(r->device, surface->sc.image_views[i], NULL);
-            }
-        }
-        free(surface->sc.image_views);
-        surface->sc.image_views = NULL;
-    }
-
-    if (surface->sc.sem_render_finished) {
-        for (uint32_t i = 0; i < surface->sc.image_count; i++) {
-            if (surface->sc.sem_render_finished[i] != VK_NULL_HANDLE) {
-                vkDestroySemaphore(r->device, surface->sc.sem_render_finished[i], NULL);
-            }
-        }
-        free(surface->sc.sem_render_finished);
-        surface->sc.sem_render_finished = NULL;
-    }
-
-    free(surface->sc.images_in_flight);
-    surface->sc.images_in_flight = NULL;
-
-    free(surface->sc.images);
-    surface->sc.images = NULL;
-    surface->sc.image_count = 0;
-
-    /* Save old swapchain handle for oldSwapchain parameter. */
-    VkSwapchainKHR old_swapchain = surface->sc.swapchain;
-    surface->sc.swapchain = VK_NULL_HANDLE;
-
-    VkSurfaceCapabilitiesKHR caps;
-    VkResult vr = vkGetPhysicalDeviceSurfaceCapabilitiesKHR(r->phys, surface->surface, &caps);
-    if (vr != VK_SUCCESS) {
-        NE_LOG_ERROR("vkGetPhysicalDeviceSurfaceCapabilitiesKHR failed (vr=%d)", (int)vr);
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    uint32_t format_count = 0;
-    vr = vkGetPhysicalDeviceSurfaceFormatsKHR(r->phys, surface->surface, &format_count, NULL);
-    if (vr != VK_SUCCESS || format_count == 0) {
-        NE_LOG_ERROR("vkGetPhysicalDeviceSurfaceFormatsKHR failed/no formats (vr=%d)", (int)vr);
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    VkSurfaceFormatKHR *formats = (VkSurfaceFormatKHR *)calloc(format_count, sizeof(VkSurfaceFormatKHR));
-    if (!formats) {
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    vr = vkGetPhysicalDeviceSurfaceFormatsKHR(r->phys, surface->surface, &format_count, formats);
-    if (vr != VK_SUCCESS) {
-        free(formats);
-        NE_LOG_ERROR("vkGetPhysicalDeviceSurfaceFormatsKHR failed (vr=%d)", (int)vr);
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    VkSurfaceFormatKHR chosen_format = ne_vk_choose_surface_format(formats, format_count);
-    free(formats);
-
-    uint32_t mode_count = 0;
-    vr = vkGetPhysicalDeviceSurfacePresentModesKHR(r->phys, surface->surface, &mode_count, NULL);
-    if (vr != VK_SUCCESS || mode_count == 0) {
-        NE_LOG_ERROR("vkGetPhysicalDeviceSurfacePresentModesKHR failed/no modes (vr=%d)", (int)vr);
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    VkPresentModeKHR *modes = (VkPresentModeKHR *)calloc(mode_count, sizeof(VkPresentModeKHR));
-    if (!modes) {
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    vr = vkGetPhysicalDeviceSurfacePresentModesKHR(r->phys, surface->surface, &mode_count, modes);
-    if (vr != VK_SUCCESS) {
-        free(modes);
-        NE_LOG_ERROR("vkGetPhysicalDeviceSurfacePresentModesKHR failed (vr=%d)", (int)vr);
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    const VkPresentModeKHR chosen_mode = ne_vk_choose_present_mode(modes, mode_count, vsync);
-    free(modes);
-
-    VkExtent2D extent = {0, 0};
-    if (caps.currentExtent.width != UINT32_MAX) {
-        extent = caps.currentExtent;
     } else {
-        extent.width = ne_vk_clamp_u32((uint32_t)fb_w, caps.minImageExtent.width, caps.maxImageExtent.width);
-        extent.height = ne_vk_clamp_u32((uint32_t)fb_h, caps.minImageExtent.height, caps.maxImageExtent.height);
-    }
-
-    uint32_t image_count = caps.minImageCount + 1;
-    if (caps.maxImageCount > 0 && image_count > caps.maxImageCount) {
-        image_count = caps.maxImageCount;
-    }
-
-    VkCompositeAlphaFlagBitsKHR composite_alpha = VK_COMPOSITE_ALPHA_PRE_MULTIPLIED_BIT_KHR;
-    if ((caps.supportedCompositeAlpha & composite_alpha) == 0) {
-        const VkCompositeAlphaFlagBitsKHR candidates[] = {VK_COMPOSITE_ALPHA_POST_MULTIPLIED_BIT_KHR,
-                                                          VK_COMPOSITE_ALPHA_INHERIT_BIT_KHR,
-                                                          VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR};
-        for (uint32_t i = 0; i < (uint32_t)(sizeof(candidates) / sizeof(candidates[0])); i++) {
-            if (caps.supportedCompositeAlpha & candidates[i]) {
-                composite_alpha = candidates[i];
-                break;
+        /*
+         * First-time creation: pick backend based on surface desc.
+         * For Vulkan WSI we need the device/queue selected first (needs a
+         * VkSurfaceKHR). For DXGI we still need the device (for importing
+         * shared buffers) but don't use VkSurfaceKHR for presentation.
+         */
+        if (surface->present_backend == NE_PRESENT_BACKEND_DXGI) {
+            if (!ne_vk_pick_device_and_queue(r, surface->surface)) {
+                return false;
             }
+            surface->swapchain = ne_swapchain_dxgi_create(&(NESwapchainDXGIDesc){
+                .device = r->device,
+                .phys = r->phys,
+                .instance = r->instance,
+                .window = surface->window,
+                .vsync = surface->vsync,
+            });
+        } else {
+            if (!ne_vk_pick_device_and_queue(r, surface->surface)) {
+                return false;
+            }
+            surface->swapchain = ne_swapchain_vulkan_wsi_create(&(NESwapchainVulkanWSIDesc){
+                .device = r->device,
+                .phys = r->phys,
+                .surface = surface->surface,
+                .window = surface->window,
+                .vsync = surface->vsync,
+            });
+        }
+
+        if (!surface->swapchain) {
+            return false;
         }
     }
 
-    VkSwapchainCreateInfoKHR sci;
-    memset(&sci, 0, sizeof(sci));
-    sci.sType = VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR;
-    sci.surface = surface->surface;
-    sci.minImageCount = image_count;
-    sci.imageFormat = chosen_format.format;
-    sci.imageColorSpace = chosen_format.colorSpace;
-    sci.imageExtent = extent;
-    sci.imageArrayLayers = 1;
-    sci.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-    sci.imageSharingMode = VK_SHARING_MODE_EXCLUSIVE;
-    sci.preTransform = caps.currentTransform;
-    sci.compositeAlpha = composite_alpha;
-    sci.presentMode = chosen_mode;
-    sci.clipped = VK_TRUE;
-    sci.oldSwapchain = old_swapchain;
-
-    vr = vkCreateSwapchainKHR(r->device, &sci, NULL, &surface->sc.swapchain);
-    if (vr != VK_SUCCESS || surface->sc.swapchain == VK_NULL_HANDLE) {
-        NE_LOG_ERROR("vkCreateSwapchainKHR failed (vr=%d)", (int)vr);
-        surface->sc.swapchain = VK_NULL_HANDLE;
-        if (old_swapchain != VK_NULL_HANDLE) {
-            vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-        }
-        return false;
-    }
-
-    /* Destroy old swapchain now that the new one is created. */
-    if (old_swapchain != VK_NULL_HANDLE) {
-        vkDestroySwapchainKHR(r->device, old_swapchain, NULL);
-    }
-
-    surface->sc.format = chosen_format.format;
-    surface->sc.color_space = chosen_format.colorSpace;
-    surface->sc.extent = extent;
-
-    uint32_t img_count = 0;
-    vr = vkGetSwapchainImagesKHR(r->device, surface->sc.swapchain, &img_count, NULL);
-    if (vr != VK_SUCCESS || img_count == 0) {
-        NE_LOG_ERROR("vkGetSwapchainImagesKHR failed/no images (vr=%d)", (int)vr);
-        return false;
-    }
-
-    surface->sc.images = (VkImage *)calloc(img_count, sizeof(VkImage));
-    if (!surface->sc.images) {
-        return false;
-    }
-
-    vr = vkGetSwapchainImagesKHR(r->device, surface->sc.swapchain, &img_count, surface->sc.images);
-    if (vr != VK_SUCCESS) {
-        NE_LOG_ERROR("vkGetSwapchainImagesKHR failed (vr=%d)", (int)vr);
-        return false;
-    }
-
-    surface->sc.image_count = img_count;
-
-    surface->sc.images_in_flight = (VkFence *)calloc(surface->sc.image_count, sizeof(VkFence));
-    if (!surface->sc.images_in_flight) {
-        return false;
-    }
-    for (uint32_t i = 0; i < surface->sc.image_count; i++) {
-        surface->sc.images_in_flight[i] = VK_NULL_HANDLE;
-    }
-
-    /* ── Render pass (created once per surface, or recreated on format change) ── */
-
+    /* Create render pass if needed (first time, or format changed). */
     if (surface->render_pass == VK_NULL_HANDLE) {
-        if (!ne_vk_create_render_pass(surface, surface->sc.format)) {
+        if (!ne_vk_create_render_pass(surface, surface->swapchain->format)) {
             return false;
         }
     }
 
-    /* ── Image views ──────────────────────────────────────────────────────── */
-
-    surface->sc.image_views = (VkImageView *)calloc(img_count, sizeof(VkImageView));
-    if (!surface->sc.image_views) {
+    /* Build framebuffers from the swapchain's image views. */
+    if (!ne_vk_build_framebuffers(surface)) {
         return false;
     }
 
-    for (uint32_t i = 0; i < img_count; i++) {
-        VkImageViewCreateInfo ivci;
-        memset(&ivci, 0, sizeof(ivci));
-        ivci.sType    = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
-        ivci.image    = surface->sc.images[i];
-        ivci.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        ivci.format   = surface->sc.format;
-        ivci.subresourceRange.aspectMask     = VK_IMAGE_ASPECT_COLOR_BIT;
-        ivci.subresourceRange.baseMipLevel   = 0;
-        ivci.subresourceRange.levelCount     = 1;
-        ivci.subresourceRange.baseArrayLayer = 0;
-        ivci.subresourceRange.layerCount     = 1;
-
-        vr = vkCreateImageView(r->device, &ivci, NULL, &surface->sc.image_views[i]);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_ERROR("vkCreateImageView[%u] failed (vr=%d)", (unsigned)i, (int)vr);
-            return false;
-        }
-    }
-
-    /* ── Framebuffers ─────────────────────────────────────────────────────── */
-
-    surface->sc.framebuffers = (VkFramebuffer *)calloc(img_count, sizeof(VkFramebuffer));
-    if (!surface->sc.framebuffers) {
-        return false;
-    }
-
-    for (uint32_t i = 0; i < img_count; i++) {
-        VkFramebufferCreateInfo fbci;
-        memset(&fbci, 0, sizeof(fbci));
-        fbci.sType           = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
-        fbci.renderPass      = surface->render_pass;
-        fbci.attachmentCount = 1;
-        fbci.pAttachments    = &surface->sc.image_views[i];
-        fbci.width           = surface->sc.extent.width;
-        fbci.height          = surface->sc.extent.height;
-        fbci.layers          = 1;
-
-        vr = vkCreateFramebuffer(r->device, &fbci, NULL, &surface->sc.framebuffers[i]);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_ERROR("vkCreateFramebuffer[%u] failed (vr=%d)", (unsigned)i, (int)vr);
-            return false;
-        }
-    }
-
-    /* ── Per-image semaphores ─────────────────────────────────────────────── */
-
-    VkSemaphoreCreateInfo sci_sem;
-    memset(&sci_sem, 0, sizeof(sci_sem));
-    sci_sem.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-
-    surface->sc.sem_render_finished = (VkSemaphore *)calloc(surface->sc.image_count, sizeof(VkSemaphore));
-    if (!surface->sc.sem_render_finished) {
-        return false;
-    }
-
-    for (uint32_t i = 0; i < surface->sc.image_count; i++) {
-        vr = vkCreateSemaphore(r->device, &sci_sem, NULL, &surface->sc.sem_render_finished[i]);
-        if (vr != VK_SUCCESS) {
-            NE_LOG_ERROR("vkCreateSemaphore(render_finished[%u]) failed (vr=%d)", (unsigned)i, (int)vr);
-            return false;
-        }
-    }
-
-    surface->wants_swapchain_recreate = false;
     return true;
 }
 
@@ -1522,7 +1215,11 @@ void ne_renderer_destroy(NERenderer *r) {
     while (s) {
         struct NERenderSurface *next = s->next;
 
-        ne_vk_swapchain_cleanup(r, &s->sc);
+        ne_vk_destroy_framebuffers(s);
+        if (s->swapchain) {
+            s->swapchain->ops->destroy(s->swapchain);
+            s->swapchain = NULL;
+        }
 
         /* Destroy surface-lifetime sync resources. */
         for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
@@ -1714,7 +1411,11 @@ void ne_renderer_destroy_surface(NERenderer *r, NERenderSurface *surface) {
         pp = &(*pp)->next;
     }
 
-    ne_vk_swapchain_cleanup(r, &surface->sc);
+    ne_vk_destroy_framebuffers(surface);
+    if (surface->swapchain) {
+        surface->swapchain->ops->destroy(surface->swapchain);
+        surface->swapchain = NULL;
+    }
 
     /* Destroy surface-lifetime sync resources. */
     for (uint32_t i = 0; i < NE_VK_MAX_FRAMES_IN_FLIGHT; i++) {
@@ -1770,10 +1471,13 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
-    if (surface->wants_swapchain_recreate || surface->sc.swapchain == VK_NULL_HANDLE) {
-        if (!ne_vk_swapchain_create(surface, surface->vsync)) {
+    NESwapchainI *sc = surface->swapchain;
+
+    if (!sc || sc->needs_recreate) {
+        if (!ne_vk_surface_ensure_swapchain(surface)) {
             return NULL;
         }
+        sc = surface->swapchain;
     }
 
     const uint32_t frame = surface->frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
@@ -1783,44 +1487,45 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
-    uint32_t image_index = 0;
-    VkResult vr = vkAcquireNextImageKHR(r->device, surface->sc.swapchain, UINT64_MAX,
-                                              surface->sem_image_available[frame], VK_NULL_HANDLE, &image_index);
+    NESwapchainAcquireResult acq = sc->ops->acquire(sc, surface->sem_image_available[frame]);
 
-    if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
-        surface->wants_swapchain_recreate = true;
+    if (acq == NE_SWAPCHAIN_ACQUIRE_OUT_OF_DATE) {
+        return NULL;
+    }
+    if (acq != NE_SWAPCHAIN_ACQUIRE_SUCCESS) {
         return NULL;
     }
 
-    if (vr != VK_SUCCESS) {
-        NE_LOG_ERROR("vkAcquireNextImageKHR failed (vr=%d)", (int)vr);
-        return NULL;
-    }
+    uint32_t image_index = sc->acquired_image_index;
 
-    if (image_index >= surface->sc.image_count) {
+    if (image_index >= sc->image_count) {
         return NULL;
     }
 
     /*
      * If a previous frame is still using this image, wait for it.
      * Important: do this BEFORE resetting the current frame fence, because
-     * `images_in_flight[image]` may point to `fences_in_flight[frame]`.
+     * images_in_flight[image] may point to fences_in_flight[frame].
+     *
+     * This tracking only applies to the Vulkan WSI path (where multiple flight
+     * frames may target different swapchain images). The DXGI path uses
+     * vkDeviceWaitIdle at present time, so this is unnecessary.
      */
-    if (surface->sc.images_in_flight && surface->sc.images_in_flight[image_index] != VK_NULL_HANDLE &&
-        surface->sc.images_in_flight[image_index] != surface->fences_in_flight[frame]) {
-        (void)vkWaitForFences(r->device, 1, &surface->sc.images_in_flight[image_index], VK_TRUE, UINT64_MAX);
+    if (surface->present_backend != NE_PRESENT_BACKEND_DXGI) {
+        VkFence *images_in_flight = ne_swapchain_vulkan_wsi_get_images_in_flight(sc);
+        if (images_in_flight && images_in_flight[image_index] != VK_NULL_HANDLE &&
+            images_in_flight[image_index] != surface->fences_in_flight[frame]) {
+            (void)vkWaitForFences(r->device, 1, &images_in_flight[image_index], VK_TRUE, UINT64_MAX);
+        }
+        if (images_in_flight) {
+            images_in_flight[image_index] = surface->fences_in_flight[frame];
+        }
     }
 
     (void)vkResetFences(r->device, 1, &surface->fences_in_flight[frame]);
     if (vkResetCommandBuffer) {
         (void)vkResetCommandBuffer(surface->cmds[frame], 0);
     }
-
-    if (surface->sc.images_in_flight) {
-        surface->sc.images_in_flight[image_index] = surface->fences_in_flight[frame];
-    }
-
-    surface->sc.acquired_image_index = image_index;
 
     VkCommandBuffer cmd = surface->cmds[frame];
 
@@ -1829,7 +1534,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     bi.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
     bi.flags = 0;
 
-    vr = vkBeginCommandBuffer(cmd, &bi);
+    VkResult vr = vkBeginCommandBuffer(cmd, &bi);
     if (vr != VK_SUCCESS) {
         return NULL;
     }
@@ -1847,9 +1552,9 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     memset(&rpbi, 0, sizeof(rpbi));
     rpbi.sType             = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
     rpbi.renderPass        = surface->render_pass;
-    rpbi.framebuffer       = surface->sc.framebuffers[image_index];
+    rpbi.framebuffer       = surface->framebuffers[image_index];
     rpbi.renderArea.offset = (VkOffset2D){0, 0};
-    rpbi.renderArea.extent = surface->sc.extent;
+    rpbi.renderArea.extent = sc->extent;
     rpbi.clearValueCount   = 1;
     rpbi.pClearValues      = &clear_value;
 
@@ -1859,9 +1564,9 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     VkViewport viewport;
     memset(&viewport, 0, sizeof(viewport));
     viewport.x        = 0.0f;
-    viewport.y        = (float)surface->sc.extent.height;
-    viewport.width    = (float)surface->sc.extent.width;
-    viewport.height   = -(float)surface->sc.extent.height;
+    viewport.y        = (float)sc->extent.height;
+    viewport.width    = (float)sc->extent.width;
+    viewport.height   = -(float)sc->extent.height;
     viewport.minDepth = 0.0f;
     viewport.maxDepth = 1.0f;
 
@@ -1870,7 +1575,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     VkRect2D scissor;
     memset(&scissor, 0, sizeof(scissor));
     scissor.offset = (VkOffset2D){0, 0};
-    scissor.extent = surface->sc.extent;
+    scissor.extent = sc->extent;
 
     vkCmdSetScissor(cmd, 0, 1, &scissor);
 
@@ -1891,6 +1596,8 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
         return;
     }
 
+    NESwapchainI *sc = surface->swapchain;
+
     /* ── Close the render pass and command buffer ────────────────────── */
 
     vkCmdEndRenderPass(pass->cmd);
@@ -1899,50 +1606,50 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkEndCommandBuffer failed (vr=%d)", (int)vr);
         *pass = (NERenderPass){0};
-        surface->wants_swapchain_recreate = true;
+        sc->needs_recreate = true;
         return;
     }
 
     /* ── Submit and present ──────────────────────────────────────────── */
 
-    const uint32_t image_index = surface->sc.acquired_image_index;
+    const uint32_t image_index = sc->acquired_image_index;
     const uint32_t frame_index = surface->frame_index % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
     VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSemaphore render_finished_sem = VK_NULL_HANDLE;
 
     VkSubmitInfo si;
     memset(&si, 0, sizeof(si));
     si.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
-    si.waitSemaphoreCount = 1;
-    si.pWaitSemaphores = &surface->sem_image_available[frame_index];
-    si.pWaitDstStageMask = &wait_stage;
     si.commandBufferCount = 1;
     si.pCommandBuffers = &surface->cmds[frame_index];
-    si.signalSemaphoreCount = 1;
-    si.pSignalSemaphores = &surface->sc.sem_render_finished[image_index];
+
+    if (surface->present_backend == NE_PRESENT_BACKEND_DXGI) {
+        /*
+         * DXGI path: no GPU semaphore from acquire (DXGI doesn't produce one),
+         * and no signal semaphore needed (present uses vkDeviceWaitIdle).
+         * We still use the flight fence for frame pacing.
+         */
+    } else {
+        /* Vulkan WSI: wait on image_available, signal render_finished. */
+        render_finished_sem = ne_swapchain_vulkan_wsi_get_render_finished_sem(sc, image_index);
+        si.waitSemaphoreCount = 1;
+        si.pWaitSemaphores = &surface->sem_image_available[frame_index];
+        si.pWaitDstStageMask = &wait_stage;
+        si.signalSemaphoreCount = 1;
+        si.pSignalSemaphores = &render_finished_sem;
+    }
 
     vr = vkQueueSubmit(r->queue, 1, &si, surface->fences_in_flight[frame_index]);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit failed (vr=%d)", (int)vr);
-        surface->wants_swapchain_recreate = true;
+        sc->needs_recreate = true;
         return;
     }
 
-    VkPresentInfoKHR pi;
-    memset(&pi, 0, sizeof(pi));
-    pi.sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR;
-    pi.waitSemaphoreCount = 1;
-    pi.pWaitSemaphores = &surface->sc.sem_render_finished[image_index];
-    pi.swapchainCount = 1;
-    pi.pSwapchains = &surface->sc.swapchain;
-    pi.pImageIndices = &image_index;
-
-    vr = vkQueuePresentKHR(r->queue, &pi);
-    if (vr == VK_ERROR_OUT_OF_DATE_KHR || vr == VK_SUBOPTIMAL_KHR) {
-        surface->wants_swapchain_recreate = true;
-    } else if (vr != VK_SUCCESS) {
-        NE_LOG_ERROR("vkQueuePresentKHR failed (vr=%d)", (int)vr);
-        surface->wants_swapchain_recreate = true;
+    NESwapchainPresentResult pres = sc->ops->present(sc, r->queue, render_finished_sem);
+    if (pres != NE_SWAPCHAIN_PRESENT_SUCCESS) {
+        /* needs_recreate is set inside the present call on OUT_OF_DATE. */
     }
 
     ne_window_show_at_least_once(surface->window);
