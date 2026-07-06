@@ -332,7 +332,17 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *renderer, NEWindow *wind
 
     layer.device = device;
     layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
-    layer.framebufferOnly = YES;
+
+    if (ne_window_is_opaque(window)) {
+        layer.framebufferOnly = YES; //false if we want to sample the framebuffer
+        layer.opaque = YES;
+        if (desc && desc->clear_color_rgba[3] < 1.0f) {
+            NE_LOG_WARN("window does not support transparency but clear_color has alpha < 1.0f");
+        }
+    } else {
+        layer.framebufferOnly = NO;
+        layer.opaque = NO;
+    }
 
     /* Best-effort vsync configuration; presentation is still synced by default. */
     if (desc) {

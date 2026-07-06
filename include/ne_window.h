@@ -67,6 +67,9 @@ typedef struct NEWindowDesc {
 
     /** Whether the window should have no titlebar or border (borderless). */
     bool undecorated;
+
+    /** Whether the window should support transparency. */
+    bool transparent;
 } NEWindowDesc;
 
 /**
@@ -476,6 +479,17 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
  * - `true` if the window exists and is open, otherwise `false`.
  */
 bool ne_window_is_open(const NEWindow *window);
+
+/**
+ * Query whether a window supports transparency.
+ *
+ * Parameters:
+ * - `window`: Window instance.
+ *
+ * Returns:
+ * - `true` if the window does NOT support transparency.
+ */
+bool ne_window_is_opaque(const NEWindow *window);
 
 /**
  * Register the callback the platform's frame driver invokes to render a frame.

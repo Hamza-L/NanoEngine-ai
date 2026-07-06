@@ -615,6 +615,11 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
         return NULL;
     }
 
+    if (desc->transparent) {
+        [ns_window setOpaque:NO];
+        [ns_window setBackgroundColor:[NSColor clearColor]];
+    }
+
     NSString *title = desc->title ? [NSString stringWithUTF8String:desc->title] : @"NanoEngine";
     [ns_window setTitle:title];
 
@@ -920,4 +925,8 @@ bool ne_window_is_mouse_button_down(const NEWindow *window, NEMouseButton button
 
 bool ne_window_is_open(const NEWindow *window) {
     return window && window->open;
+}
+
+bool ne_window_is_opaque(const NEWindow *window) {
+    return window && [(__bridge NSWindow* )window->ns_window isOpaque];
 }
