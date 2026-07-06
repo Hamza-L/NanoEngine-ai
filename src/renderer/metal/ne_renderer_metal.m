@@ -72,6 +72,16 @@ struct NERenderer {
     NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
 };
 
+/**
+ * NERenderPass is a lightweight token pointing back to the owning surface. One
+ * instance is embedded in each NERenderSurface (see below) and returned by
+ * begin_frame, so every surface can be mid-frame independently — this is what
+ * lets N windows render in the same tick without a global bottleneck.
+ */
+struct NERenderPass {
+    NERenderSurface *surface;
+};
+
 struct NERenderSurface {
     NERenderer *renderer;
     NEWindow *window;
@@ -95,23 +105,20 @@ struct NERenderSurface {
      */
     uint32_t frame_index;
 
+    /*
+     * The render-pass token handed to the caller between begin_frame and
+     * end_frame. Embedded here (rather than a single global) so each surface's
+     * frame is independent. A frame is "in progress" for this surface exactly
+     * when drawable/command_buffer are non-NULL — that is the guard, so there is
+     * no separate sentinel to keep in sync.
+     */
+    NERenderPass pass;
+
     /* Per-pass draw state (valid between begin_frame / end_frame). */
     uint32_t current_topology;        /* MTLPrimitiveType              */
     NEBufferHandle current_index_buffer;
     uint32_t current_index_type;      /* MTLIndexType                  */
 };
-
-/**
- * NERenderPass is a lightweight token pointing back to the owning surface.
- * A single static instance is reused each frame to avoid per-frame heap
- * allocation.  Only one frame may be in-flight at a time — begin_frame will
- * reject a second call until end_frame clears the active pass.
- */
-struct NERenderPass {
-    NERenderSurface *surface;
-};
-
-static NERenderPass g_active_pass = {0};
 
 /* Association key used to enforce one render surface per window. */
 static const void *g_surface_assoc_key = &g_surface_assoc_key;
@@ -441,13 +448,13 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
         return NULL;
     }
 
-    if (g_active_pass.surface) {
-        NE_LOG_WARN("begin_frame called while a frame is already in progress — call ne_renderer_end_frame first");
-        return NULL;
-    }
-
+    /*
+     * A frame is already in progress for THIS surface when its drawable/command
+     * buffer are still live. This is the sole in-progress guard — per-surface,
+     * so it does not block other surfaces from beginning their own frames.
+     */
     if (surface->drawable || surface->command_buffer) {
-        NE_LOG_WARN("begin_frame called with dangling frame state on surface");
+        NE_LOG_WARN("begin_frame called while a frame is already in progress on this surface — call ne_renderer_end_frame first");
         return NULL;
     }
 
@@ -537,8 +544,8 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
     surface->current_index_buffer = NE_BUFFER_HANDLE_NULL;
     surface->current_index_type = MTLIndexTypeUInt16;
 
-    g_active_pass.surface = surface;
-    return &g_active_pass;
+    surface->pass.surface = surface;
+    return &surface->pass;
 
 #undef NE_MTL_FRAME_ABORT
 }
