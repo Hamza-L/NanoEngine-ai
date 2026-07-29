@@ -1274,6 +1274,8 @@ void ne_renderer_destroy(NERenderer *r) {
                 vkDestroyShaderModule(r->device, sslot->module, NULL);
             }
             free(sslot->entry_point);
+            sslot->entry_point = NULL;
+            sslot->stage       = 0;
         }
     }
     ne_pool_destroy(&r->shaders);
@@ -2659,6 +2661,7 @@ void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
     NEVulkanShaderSlot *slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[index];
 
     free(slot->entry_point);
+    vkDestroyShaderModule(renderer->device, slot->module, NULL);
     slot->entry_point = NULL;
     slot->stage       = 0;
 
@@ -3051,15 +3054,6 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     if (slot->layout != VK_NULL_HANDLE) {
         vkDestroyPipelineLayout(renderer->device, slot->layout, NULL);
         slot->layout = VK_NULL_HANDLE;
-    }
-
-    if (slot->vert_module != VK_NULL_HANDLE) {
-        vkDestroyShaderModule(renderer->device, slot->vert_module, NULL);
-        slot->vert_module = VK_NULL_HANDLE;
-    }
-    if (slot->frag_module != VK_NULL_HANDLE) {
-        vkDestroyShaderModule(renderer->device, slot->frag_module, NULL);
-        slot->frag_module = VK_NULL_HANDLE;
     }
 
     free(slot->vert_entry);

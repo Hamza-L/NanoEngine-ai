@@ -15,20 +15,6 @@
 
 /* ── Callbacks ──────────────────────────────────────────────────────────── */
 
-static void on_close(NEWindow *window, void *user_data) {
-    (void)window;
-    (void)user_data;
-    NE_LOG_INFO("window closing");
-}
-
-static void on_resize(NEWindow *window, int32_t width, int32_t height, void *user_data) {
-    (void)window;
-    (void)user_data;
-    (void)width;
-    (void)height;
-    // NE_LOG_INFO("resize: %d x %d", width, height);
-}
-
 static void on_key_down(NEWindow *window, NEKeyEvent event, void *user_data) {
     (void)user_data;
     if (event.key == NE_KEY_ESCAPE) {
@@ -57,6 +43,7 @@ static const Vertex k_triangle_vertices[] = {
  * tearing — which only holds if each frame writes its own buffer copy while the
  * GPU still reads the previous frame's copy.
  */
+
 typedef struct DemoState {
     float angle; /* radians, advanced each frame */
 } DemoState;
@@ -72,6 +59,7 @@ static void on_frame_update(NEFrameContext *ctx, NERenderPass *pass) {
      * pipeline creation needs). On native the resources were created eagerly, so
      * the handles are already valid and this block is a no-op.
      */
+
     if (!ne_pipeline_handle_valid(ctx->pipeline)) {
         ctx->pipeline = create_basic_pipeline(ctx->renderer);
         ctx->vertex_buffer = ne_buffer_create(ctx->renderer, &(NEBufferDesc){
@@ -88,7 +76,6 @@ static void on_frame_update(NEFrameContext *ctx, NERenderPass *pass) {
 
     DemoState *state = (DemoState *)ctx->user;
     state->angle += 0.02f;
-
     const float c = cosf(state->angle);
     const float s = sinf(state->angle);
 
@@ -216,9 +203,6 @@ static NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
         .topology = NE_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
     });
 
-    ne_shader_destroy(renderer, fragment_shader);
-    ne_shader_destroy(renderer, vertex_shader);
-
     return pipeline;
 }
 
@@ -255,8 +239,6 @@ int main(void) {
     }
 
     const NEWindowCallbacks callbacks = {
-        .on_close = on_close,
-        .on_resize = on_resize,
         .on_key_down = on_key_down,
     };
     ne_window_set_callbacks(window, &callbacks, NULL);
@@ -299,7 +281,6 @@ int main(void) {
     pipeline = create_basic_pipeline(renderer);
     if (!ne_pipeline_handle_valid(pipeline)) {
         NE_LOG_ERROR("failed to create pipeline");
-        ne_renderer_destroy_surface(renderer, surface);
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);
         ne_app_destroy(app);
@@ -366,8 +347,6 @@ int main(void) {
     /* ── Cleanup ───────────────────────────────────────────────────────── */
 
     ne_pipeline_destroy(renderer, frame_ctx.pipeline);
-    ne_buffer_destroy(renderer, frame_ctx.vertex_buffer);
-    ne_renderer_destroy_surface(renderer, surface);
     ne_renderer_destroy(renderer);
     ne_window_destroy(window);
     ne_app_destroy(app);
