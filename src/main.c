@@ -244,7 +244,6 @@ int main(void) {
     ne_window_set_callbacks(window, &callbacks, NULL);
 
     /* ── Renderer + surface ────────────────────────────────────────────── */
-
     NERenderer *renderer = ne_renderer_create(app, &(NERendererDesc){.enable_validation = true});
     if (!renderer) {
         NE_LOG_ERROR("failed to create renderer");
@@ -276,7 +275,6 @@ int main(void) {
      */
     NEPipelineHandle pipeline = NE_PIPELINE_HANDLE_NULL;
     NEBufferHandle vbo = NE_BUFFER_HANDLE_NULL;
-
 #ifndef __EMSCRIPTEN__
     pipeline = create_basic_pipeline(renderer);
     if (!ne_pipeline_handle_valid(pipeline)) {

@@ -44,6 +44,7 @@ TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 .DEFAULT_GOAL := all
 
 CFLAGS := -std=c23 -g -DDEBUG -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
+CFLAGS += -Iexternal
 OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
 

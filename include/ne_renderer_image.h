@@ -55,6 +55,13 @@ typedef struct NEImageDesc {
 NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc);
 
 /**
+ * Create a GPU image buffer from file.
+ *
+ * Returns NE_BUFFER_HANDLE_NULL on failure.
+ */
+NEImageHandle ne_image_load(NERenderer *renderer, const char* filename);
+
+/**
  * Update a region of an existing buffer.
  *
  * Parameters:

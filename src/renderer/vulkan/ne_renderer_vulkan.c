@@ -22,6 +22,9 @@
 #include "ne_window.h"
 #include "ne_alloc.h"
 
+#define STB_IMAGE_IMPLEMENTATION
+#include "stb/stb_image.h"
+
 #include "glslang_c_interface.h"
 #include "../Public/resource_limits_c.h"
 
@@ -2275,6 +2278,14 @@ NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc) {
 
     /* Return handle (1-based ID for null safety) */
     return handle;
+}
+
+NEImageHandle ne_image_load(NERenderer *renderer, const char *filename) {
+    if (!renderer || !filename) {
+        return NE_IMAGE_HANDLE_NULL;
+    }
+
+    return (NEImageHandle){};
 }
 
 void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *data, uint32_t size) {
