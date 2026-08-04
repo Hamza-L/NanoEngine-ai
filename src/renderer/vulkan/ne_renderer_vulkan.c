@@ -1,4 +1,3 @@
-#include "glslang_c_shader_types.h"
 #if !defined(_WIN32)
 #error "Vulkan renderer backend is currently implemented for Win32 only"
 #endif
@@ -6,13 +5,7 @@
 #define WIN32_LEAN_AND_MEAN
 #include <windows.h>
 
-/* We dynamically load Vulkan; don't rely on link-time prototypes. */
-#define VK_NO_PROTOTYPES
-#define VK_USE_PLATFORM_WIN32_KHR
-#include <vulkan/vulkan.h>
-
 #include "ne_log.h"
-#include "ne_file.h"
 #include "ne_renderer.h"
 #include "ne_renderer_buffer.h"
 #include "ne_renderer_image.h"
@@ -25,9 +18,6 @@
 #define STB_IMAGE_IMPLEMENTATION
 #include "stb/stb_image.h"
 
-#include "glslang_c_interface.h"
-#include "../Public/resource_limits_c.h"
-
 #include "ne_swapchain.h"
 
 #include <stdbool.h>
@@ -35,153 +25,13 @@
 #include <stdlib.h>
 #include <string.h>
 
-/* Global */
-PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr;
-PFN_vkGetDeviceProcAddr vkGetDeviceProcAddr;
+#include "internal/ne_vulkan_globals.h"
+#include "internal/ne_vulkan_loader.h"
+#include "internal/ne_vulkan_buffers.h"
 
-/* Instance */
-PFN_vkCreateInstance vkCreateInstance;
-PFN_vkDestroyInstance vkDestroyInstance;
-PFN_vkEnumerateInstanceExtensionProperties vkEnumerateInstanceExtensionProperties;
-PFN_vkEnumerateInstanceLayerProperties vkEnumerateInstanceLayerProperties;
-PFN_vkEnumeratePhysicalDevices vkEnumeratePhysicalDevices;
-PFN_vkGetPhysicalDeviceProperties vkGetPhysicalDeviceProperties;
-PFN_vkGetPhysicalDeviceQueueFamilyProperties vkGetPhysicalDeviceQueueFamilyProperties;
-
-PFN_vkCreateDevice vkCreateDevice;
-
-PFN_vkGetPhysicalDeviceSurfaceSupportKHR vkGetPhysicalDeviceSurfaceSupportKHR;
-PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR vkGetPhysicalDeviceSurfaceCapabilitiesKHR;
-PFN_vkGetPhysicalDeviceSurfaceFormatsKHR vkGetPhysicalDeviceSurfaceFormatsKHR;
-PFN_vkGetPhysicalDeviceSurfacePresentModesKHR vkGetPhysicalDeviceSurfacePresentModesKHR;
-
-PFN_vkCreateWin32SurfaceKHR vkCreateWin32SurfaceKHR;
-PFN_vkDestroySurfaceKHR vkDestroySurfaceKHR;
-
-/* Device */
-PFN_vkDestroyDevice vkDestroyDevice;
-PFN_vkGetDeviceQueue vkGetDeviceQueue;
-PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
-
-PFN_vkCreateSwapchainKHR vkCreateSwapchainKHR;
-PFN_vkDestroySwapchainKHR vkDestroySwapchainKHR;
-PFN_vkGetSwapchainImagesKHR vkGetSwapchainImagesKHR;
-PFN_vkAcquireNextImageKHR vkAcquireNextImageKHR;
-
-PFN_vkQueueSubmit vkQueueSubmit;
-PFN_vkQueuePresentKHR vkQueuePresentKHR;
-PFN_vkQueueWaitIdle vkQueueWaitIdle;
-
-PFN_vkCreateSemaphore vkCreateSemaphore;
-PFN_vkDestroySemaphore vkDestroySemaphore;
-PFN_vkCreateFence vkCreateFence;
-PFN_vkDestroyFence vkDestroyFence;
-PFN_vkWaitForFences vkWaitForFences;
-PFN_vkResetFences vkResetFences;
-
-PFN_vkCreateCommandPool vkCreateCommandPool;
-PFN_vkDestroyCommandPool vkDestroyCommandPool;
-PFN_vkResetCommandPool vkResetCommandPool;
-PFN_vkResetCommandBuffer vkResetCommandBuffer;
-PFN_vkAllocateCommandBuffers vkAllocateCommandBuffers;
-PFN_vkFreeCommandBuffers vkFreeCommandBuffers;
-
-PFN_vkBeginCommandBuffer vkBeginCommandBuffer;
-PFN_vkEndCommandBuffer vkEndCommandBuffer;
-PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
-PFN_vkCmdClearColorImage vkCmdClearColorImage;
-
-/* Buffer management */
-PFN_vkGetPhysicalDeviceMemoryProperties vkGetPhysicalDeviceMemoryProperties;
-PFN_vkCreateBuffer vkCreateBuffer;
-PFN_vkDestroyBuffer vkDestroyBuffer;
-PFN_vkCreateImage vkCreateImage;
-PFN_vkDestroyImage vkDestroyImage;
-PFN_vkGetBufferMemoryRequirements vkGetBufferMemoryRequirements;
-PFN_vkGetImageMemoryRequirements vkGetImageMemoryRequirements;
-PFN_vkAllocateMemory vkAllocateMemory;
-PFN_vkFreeMemory vkFreeMemory;
-PFN_vkBindBufferMemory vkBindBufferMemory;
-PFN_vkBindImageMemory vkBindImageMemory;
-PFN_vkMapMemory vkMapMemory;
-PFN_vkUnmapMemory vkUnmapMemory;
-PFN_vkFlushMappedMemoryRanges vkFlushMappedMemoryRanges;
-PFN_vkCmdCopyBuffer vkCmdCopyBuffer;
-PFN_vkCmdCopyImage vkCmdCopyImage;
-PFN_vkCmdCopyBufferToImage vkCmdCopyBufferToImage;
-
-/* Shader management */
-PFN_vkCreateShaderModule vkCreateShaderModule;
-PFN_vkDestroyShaderModule vkDestroyShaderModule;
-
-/* Render pass */
-PFN_vkCreateRenderPass vkCreateRenderPass;
-PFN_vkDestroyRenderPass vkDestroyRenderPass;
-
-/* Image views */
-PFN_vkCreateImageView vkCreateImageView;
-PFN_vkDestroyImageView vkDestroyImageView;
-
-/* Framebuffers */
-PFN_vkCreateFramebuffer vkCreateFramebuffer;
-PFN_vkDestroyFramebuffer vkDestroyFramebuffer;
-
-/* Pipeline */
-PFN_vkCreatePipelineLayout vkCreatePipelineLayout;
-PFN_vkDestroyPipelineLayout vkDestroyPipelineLayout;
-PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
-PFN_vkDestroyPipeline vkDestroyPipeline;
-
-/* Render pass commands */
-PFN_vkCmdBeginRenderPass vkCmdBeginRenderPass;
-PFN_vkCmdEndRenderPass vkCmdEndRenderPass;
-PFN_vkCmdBindPipeline vkCmdBindPipeline;
-PFN_vkCmdBindVertexBuffers vkCmdBindVertexBuffers;
-PFN_vkCmdBindIndexBuffer vkCmdBindIndexBuffer;
-PFN_vkCmdSetViewport vkCmdSetViewport;
-PFN_vkCmdSetScissor vkCmdSetScissor;
-PFN_vkCmdDraw vkCmdDraw;
-PFN_vkCmdDrawIndexed vkCmdDrawIndexed;
-PFN_vkCmdPushConstants vkCmdPushConstants;
-
-enum {
-    NE_VK_MAX_FRAMES_IN_FLIGHT = 2,
-};
-
-/* ── Buffer resource pool ───────────────────────────────────────────────── */
-
-typedef struct NEVulkanBufferSlot {
-    bool occupied;
-    bool dynamic;          /* true: per-frame host-visible copies (no stall, no race) */
-    uint32_t usage;
-    union {
-        uint32_t size;
-        struct {
-            uint32_t width;
-            uint32_t height;
-            NEImageFormat format;
-        };
-    };
-    union {
-        VkBuffer buffer;
-        struct {
-            VkImage image;
-            VkImageView imageView;
-        };
-    };
-    VkDeviceMemory memory;
-
-    /*
-     * Dynamic buffers only: one host-visible + coherent, persistently-mapped
-     * copy per in-flight frame. The CPU writes mapped[frame] directly (no
-     * staging buffer, no transfer, no stall) while the GPU reads another copy.
-     * Static buffers leave these zeroed and use `buffer`/`memory` above
-     * (device-local + staged upload).
-     */
-    VkBuffer dyn_buffers[NE_VK_MAX_FRAMES_IN_FLIGHT];
-    VkDeviceMemory dyn_memories[NE_VK_MAX_FRAMES_IN_FLIGHT];
-    void *dyn_mapped[NE_VK_MAX_FRAMES_IN_FLIGHT];
-} NEVulkanBufferSlot;
+#include "internal/ne_vulkan_shaders.h"
+#include "internal/ne_vulkan_pipelines.h"
+#include "internal/ne_vulkan_renderer.h"
 
 /* Select the VkBuffer a slot exposes for a given frame: the per-frame copy for
  * dynamic buffers, or the single device-local buffer for static ones. */
@@ -192,77 +42,11 @@ static VkBuffer ne_vk_buffer_for_frame(const NEVulkanBufferSlot *slot, uint32_t 
     return slot->buffer;
 }
 
-/* ── Shader resource pool ───────────────────────────────────────────────── */
-typedef struct NEVulkanShaderSlot {
-    bool occupied;
-    uint32_t stage;             /* NEShaderStage value */
-    VkShaderModule module;
-    char *entry_point;          /* entry point name */
-} NEVulkanShaderSlot;
-
-/* ── Pipeline resource pool ─────────────────────────────────────────────── */
-typedef struct NEVulkanPipelineSlot {
-    bool occupied;
-    bool needs_compile;         /* true until first successful vkCreateGraphicsPipelines */
-    bool compilation_failed;    /* true if deferred compilation failed */
-
-    /* Eagerly created at ne_pipeline_create time. */
-    VkPipelineLayout layout;
-
-    /* Captured state for deferred vkCreateGraphicsPipelines. */
-    VkShaderModule vert_module;
-    VkShaderModule frag_module;
-    VkShaderModule compute_module;
-    char *vert_entry;           /* strdup'd entry point name */
-    char *frag_entry;           /* strdup'd entry point name */
-    char *compute_entry;        /* strdup'd entry point name */
-
-    VkVertexInputBindingDescription *bindings;
-    uint32_t binding_count;
-    VkVertexInputAttributeDescription *attributes;
-    uint32_t attribute_count;
-
-    VkPrimitiveTopology topology;
-    VkPipelineColorBlendAttachmentState blend;
-
-    /* Created during deferred compilation (VK_NULL_HANDLE until then). */
-    VkPipeline pipeline;
-} NEVulkanPipelineSlot;
-
 /* Forward declare accessors from ne_swapchain_vulkan_wsi.c */
 VkFence *ne_swapchain_vulkan_wsi_get_images_in_flight(NESwapchainI *iface);
 VkSemaphore ne_swapchain_vulkan_wsi_get_render_finished_sem(NESwapchainI *iface, uint32_t image_index);
 
-struct NERenderer {
-    HMODULE vulkan_lib;
-    VkInstance instance;
-
-    VkPhysicalDevice phys;
-    VkPhysicalDeviceMemoryProperties mem_props;
-    VkDevice device;
-    VkQueue queue;
-    uint32_t queue_family_index;
-
-    NEPool buffers;
-    NEPool shaders;
-    NEPool pipelines;
-
-    /* Staging buffer for data uploads */
-    VkBuffer staging_buffer;
-    VkDeviceMemory staging_memory;
-    void *staging_mapped;
-    uint32_t staging_size;
-
-    /* Transfer command pool for staging uploads */
-    VkCommandPool transfer_cmd_pool;
-    VkCommandBuffer transfer_cmd;
-    VkFence transfer_fence;
-
-    /* Runtime GLSL → SPIR-V compilation via shaderc (loaded dynamically). */
-    NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
-
-    struct NERenderSurface *surfaces;
-};
+NERenderer *g_renderer_singleton = NULL;
 
 struct NERenderPass {
     VkCommandBuffer cmd;
@@ -296,181 +80,6 @@ struct NERenderSurface {
 
     NERenderPass pass;
 };
-
-static NERenderer *g_renderer_singleton = NULL;
-
-static void *ne_vk_get_global(const char *name) {
-    if (!vkGetInstanceProcAddr) {
-        return NULL;
-    }
-    return (void *)vkGetInstanceProcAddr(VK_NULL_HANDLE, name);
-}
-
-static void *ne_vk_get_instance(VkInstance instance, const char *name) {
-    if (!vkGetInstanceProcAddr) {
-        return NULL;
-    }
-    return (void *)vkGetInstanceProcAddr(instance, name);
-}
-
-static void *ne_vk_get_device(VkDevice device, const char *name) {
-    if (!vkGetDeviceProcAddr) {
-        return NULL;
-    }
-    return (void *)vkGetDeviceProcAddr(device, name);
-}
-
-static bool ne_vk_load_loader(NERenderer *renderer) {
-    renderer->vulkan_lib = LoadLibraryA("vulkan-1.dll");
-    if (!renderer->vulkan_lib) {
-        NE_LOG_ERROR("failed to load vulkan-1.dll (Vulkan runtime not installed?)");
-        return false;
-    }
-
-    vkGetInstanceProcAddr = (PFN_vkGetInstanceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetInstanceProcAddr");
-    vkGetDeviceProcAddr = (PFN_vkGetDeviceProcAddr)GetProcAddress(renderer->vulkan_lib, "vkGetDeviceProcAddr");
-
-    if (!vkGetInstanceProcAddr || !vkGetDeviceProcAddr) {
-        NE_LOG_ERROR("failed to get Vulkan proc address functions");
-        return false;
-    }
-
-    vkCreateInstance = (PFN_vkCreateInstance)ne_vk_get_global("vkCreateInstance");
-    vkEnumerateInstanceExtensionProperties = (PFN_vkEnumerateInstanceExtensionProperties)ne_vk_get_global("vkEnumerateInstanceExtensionProperties");
-    vkEnumerateInstanceLayerProperties = (PFN_vkEnumerateInstanceLayerProperties)ne_vk_get_global("vkEnumerateInstanceLayerProperties");
-
-    if (!vkCreateInstance || !vkEnumerateInstanceExtensionProperties) {
-        NE_LOG_ERROR("failed to load required Vulkan loader entry points");
-        return false;
-    }
-
-    return true;
-}
-
-static bool ne_vk_load_instance_fns(NERenderer *r) {
-    vkDestroyInstance = (PFN_vkDestroyInstance)ne_vk_get_instance(r->instance, "vkDestroyInstance");
-    vkEnumeratePhysicalDevices = (PFN_vkEnumeratePhysicalDevices)ne_vk_get_instance(r->instance, "vkEnumeratePhysicalDevices");
-    vkGetPhysicalDeviceProperties = (PFN_vkGetPhysicalDeviceProperties)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceProperties");
-    vkGetPhysicalDeviceQueueFamilyProperties = (PFN_vkGetPhysicalDeviceQueueFamilyProperties)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceQueueFamilyProperties");
-    vkCreateDevice = (PFN_vkCreateDevice)ne_vk_get_instance(r->instance, "vkCreateDevice");
-    vkGetPhysicalDeviceMemoryProperties = (PFN_vkGetPhysicalDeviceMemoryProperties)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceMemoryProperties");
-
-    vkCreateWin32SurfaceKHR = (PFN_vkCreateWin32SurfaceKHR)ne_vk_get_instance(r->instance, "vkCreateWin32SurfaceKHR");
-    vkDestroySurfaceKHR = (PFN_vkDestroySurfaceKHR)ne_vk_get_instance(r->instance, "vkDestroySurfaceKHR");
-
-    vkGetPhysicalDeviceSurfaceSupportKHR = (PFN_vkGetPhysicalDeviceSurfaceSupportKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfaceSupportKHR");
-    vkGetPhysicalDeviceSurfaceCapabilitiesKHR = (PFN_vkGetPhysicalDeviceSurfaceCapabilitiesKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfaceCapabilitiesKHR");
-    vkGetPhysicalDeviceSurfaceFormatsKHR = (PFN_vkGetPhysicalDeviceSurfaceFormatsKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfaceFormatsKHR");
-    vkGetPhysicalDeviceSurfacePresentModesKHR = (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)ne_vk_get_instance(r->instance, "vkGetPhysicalDeviceSurfacePresentModesKHR");
-
-    return vkDestroyInstance && vkEnumeratePhysicalDevices && vkGetPhysicalDeviceQueueFamilyProperties && vkCreateDevice &&
-           vkCreateWin32SurfaceKHR && vkDestroySurfaceKHR && vkGetPhysicalDeviceSurfaceSupportKHR &&
-           vkGetPhysicalDeviceSurfaceCapabilitiesKHR && vkGetPhysicalDeviceSurfaceFormatsKHR && vkGetPhysicalDeviceSurfacePresentModesKHR &&
-           vkGetPhysicalDeviceMemoryProperties;
-}
-
-static bool ne_vk_load_device_fns(NERenderer *r) {
-    vkDestroyDevice = (PFN_vkDestroyDevice)ne_vk_get_device(r->device, "vkDestroyDevice");
-    vkGetDeviceQueue = (PFN_vkGetDeviceQueue)ne_vk_get_device(r->device, "vkGetDeviceQueue");
-    vkDeviceWaitIdle = (PFN_vkDeviceWaitIdle)ne_vk_get_device(r->device, "vkDeviceWaitIdle");
-
-    vkCreateSwapchainKHR = (PFN_vkCreateSwapchainKHR)ne_vk_get_device(r->device, "vkCreateSwapchainKHR");
-    vkDestroySwapchainKHR = (PFN_vkDestroySwapchainKHR)ne_vk_get_device(r->device, "vkDestroySwapchainKHR");
-    vkGetSwapchainImagesKHR = (PFN_vkGetSwapchainImagesKHR)ne_vk_get_device(r->device, "vkGetSwapchainImagesKHR");
-    vkAcquireNextImageKHR = (PFN_vkAcquireNextImageKHR)ne_vk_get_device(r->device, "vkAcquireNextImageKHR");
-
-    vkQueueSubmit = (PFN_vkQueueSubmit)ne_vk_get_device(r->device, "vkQueueSubmit");
-    vkQueuePresentKHR = (PFN_vkQueuePresentKHR)ne_vk_get_device(r->device, "vkQueuePresentKHR");
-    vkQueueWaitIdle = (PFN_vkQueueWaitIdle)ne_vk_get_device(r->device, "vkQueueWaitIdle");
-
-    vkCreateSemaphore = (PFN_vkCreateSemaphore)ne_vk_get_device(r->device, "vkCreateSemaphore");
-    vkDestroySemaphore = (PFN_vkDestroySemaphore)ne_vk_get_device(r->device, "vkDestroySemaphore");
-    vkCreateFence = (PFN_vkCreateFence)ne_vk_get_device(r->device, "vkCreateFence");
-    vkDestroyFence = (PFN_vkDestroyFence)ne_vk_get_device(r->device, "vkDestroyFence");
-    vkWaitForFences = (PFN_vkWaitForFences)ne_vk_get_device(r->device, "vkWaitForFences");
-    vkResetFences = (PFN_vkResetFences)ne_vk_get_device(r->device, "vkResetFences");
-
-    vkCreateCommandPool = (PFN_vkCreateCommandPool)ne_vk_get_device(r->device, "vkCreateCommandPool");
-    vkDestroyCommandPool = (PFN_vkDestroyCommandPool)ne_vk_get_device(r->device, "vkDestroyCommandPool");
-    vkResetCommandPool = (PFN_vkResetCommandPool)ne_vk_get_device(r->device, "vkResetCommandPool");
-    vkResetCommandBuffer = (PFN_vkResetCommandBuffer)ne_vk_get_device(r->device, "vkResetCommandBuffer");
-    vkAllocateCommandBuffers = (PFN_vkAllocateCommandBuffers)ne_vk_get_device(r->device, "vkAllocateCommandBuffers");
-    vkFreeCommandBuffers = (PFN_vkFreeCommandBuffers)ne_vk_get_device(r->device, "vkFreeCommandBuffers");
-
-    vkBeginCommandBuffer = (PFN_vkBeginCommandBuffer)ne_vk_get_device(r->device, "vkBeginCommandBuffer");
-    vkEndCommandBuffer = (PFN_vkEndCommandBuffer)ne_vk_get_device(r->device, "vkEndCommandBuffer");
-    vkCmdPipelineBarrier = (PFN_vkCmdPipelineBarrier)ne_vk_get_device(r->device, "vkCmdPipelineBarrier");
-    vkCmdClearColorImage = (PFN_vkCmdClearColorImage)ne_vk_get_device(r->device, "vkCmdClearColorImage");
-
-    /* Buffer management functions */
-    vkCreateBuffer = (PFN_vkCreateBuffer)ne_vk_get_device(r->device, "vkCreateBuffer");
-    vkDestroyBuffer = (PFN_vkDestroyBuffer)ne_vk_get_device(r->device, "vkDestroyBuffer");
-    vkCreateImage = (PFN_vkCreateImage)ne_vk_get_device(r->device, "vkCreateImage");
-    vkDestroyImage = (PFN_vkDestroyImage)ne_vk_get_device(r->device, "vkDestroyImage");
-    vkGetBufferMemoryRequirements = (PFN_vkGetBufferMemoryRequirements)ne_vk_get_device(r->device, "vkGetBufferMemoryRequirements");
-    vkGetImageMemoryRequirements = (PFN_vkGetImageMemoryRequirements)ne_vk_get_device(r->device, "vkGetImageMemoryRequirements");
-    vkAllocateMemory = (PFN_vkAllocateMemory)ne_vk_get_device(r->device, "vkAllocateMemory");
-    vkFreeMemory = (PFN_vkFreeMemory)ne_vk_get_device(r->device, "vkFreeMemory");
-    vkBindBufferMemory = (PFN_vkBindBufferMemory)ne_vk_get_device(r->device, "vkBindBufferMemory");
-    vkBindImageMemory = (PFN_vkBindImageMemory)ne_vk_get_device(r->device, "vkBindImageMemory");
-    vkMapMemory = (PFN_vkMapMemory)ne_vk_get_device(r->device, "vkMapMemory");
-    vkUnmapMemory = (PFN_vkUnmapMemory)ne_vk_get_device(r->device, "vkUnmapMemory");
-    vkFlushMappedMemoryRanges = (PFN_vkFlushMappedMemoryRanges)ne_vk_get_device(r->device, "vkFlushMappedMemoryRanges");
-    vkCmdCopyBuffer = (PFN_vkCmdCopyBuffer)ne_vk_get_device(r->device, "vkCmdCopyBuffer");
-    vkCmdCopyImage = (PFN_vkCmdCopyImage)ne_vk_get_device(r->device, "vkCmdCopyImage");
-    vkCmdCopyBufferToImage = (PFN_vkCmdCopyBufferToImage)ne_vk_get_device(r->device, "vkCmdCopyBufferToImage");
-
-    /* Shader management functions */
-    vkCreateShaderModule = (PFN_vkCreateShaderModule)ne_vk_get_device(r->device, "vkCreateShaderModule");
-    vkDestroyShaderModule = (PFN_vkDestroyShaderModule)ne_vk_get_device(r->device, "vkDestroyShaderModule");
-
-    /* Render pass */
-    vkCreateRenderPass = (PFN_vkCreateRenderPass)ne_vk_get_device(r->device, "vkCreateRenderPass");
-    vkDestroyRenderPass = (PFN_vkDestroyRenderPass)ne_vk_get_device(r->device, "vkDestroyRenderPass");
-
-    /* Image views */
-    vkCreateImageView = (PFN_vkCreateImageView)ne_vk_get_device(r->device, "vkCreateImageView");
-    vkDestroyImageView = (PFN_vkDestroyImageView)ne_vk_get_device(r->device, "vkDestroyImageView");
-
-    /* Framebuffers */
-    vkCreateFramebuffer = (PFN_vkCreateFramebuffer)ne_vk_get_device(r->device, "vkCreateFramebuffer");
-    vkDestroyFramebuffer = (PFN_vkDestroyFramebuffer)ne_vk_get_device(r->device, "vkDestroyFramebuffer");
-
-    /* Pipeline */
-    vkCreatePipelineLayout = (PFN_vkCreatePipelineLayout)ne_vk_get_device(r->device, "vkCreatePipelineLayout");
-    vkDestroyPipelineLayout = (PFN_vkDestroyPipelineLayout)ne_vk_get_device(r->device, "vkDestroyPipelineLayout");
-    vkCreateGraphicsPipelines = (PFN_vkCreateGraphicsPipelines)ne_vk_get_device(r->device, "vkCreateGraphicsPipelines");
-    vkDestroyPipeline = (PFN_vkDestroyPipeline)ne_vk_get_device(r->device, "vkDestroyPipeline");
-
-    /* Render pass commands */
-    vkCmdBeginRenderPass = (PFN_vkCmdBeginRenderPass)ne_vk_get_device(r->device, "vkCmdBeginRenderPass");
-    vkCmdEndRenderPass = (PFN_vkCmdEndRenderPass)ne_vk_get_device(r->device, "vkCmdEndRenderPass");
-    vkCmdBindPipeline = (PFN_vkCmdBindPipeline)ne_vk_get_device(r->device, "vkCmdBindPipeline");
-    vkCmdBindVertexBuffers = (PFN_vkCmdBindVertexBuffers)ne_vk_get_device(r->device, "vkCmdBindVertexBuffers");
-    vkCmdBindIndexBuffer = (PFN_vkCmdBindIndexBuffer)ne_vk_get_device(r->device, "vkCmdBindIndexBuffer");
-    vkCmdSetViewport = (PFN_vkCmdSetViewport)ne_vk_get_device(r->device, "vkCmdSetViewport");
-    vkCmdSetScissor = (PFN_vkCmdSetScissor)ne_vk_get_device(r->device, "vkCmdSetScissor");
-    vkCmdDraw = (PFN_vkCmdDraw)ne_vk_get_device(r->device, "vkCmdDraw");
-    vkCmdDrawIndexed = (PFN_vkCmdDrawIndexed)ne_vk_get_device(r->device, "vkCmdDrawIndexed");
-    vkCmdPushConstants = (PFN_vkCmdPushConstants)ne_vk_get_device(r->device, "vkCmdPushConstants");
-
-    return vkDestroyDevice && vkGetDeviceQueue && vkCreateSwapchainKHR && vkGetSwapchainImagesKHR &&
-           vkAcquireNextImageKHR && vkQueueSubmit && vkQueuePresentKHR && vkCreateSemaphore && vkCreateFence &&
-           vkWaitForFences && vkResetFences && vkCreateCommandPool && vkResetCommandBuffer && vkAllocateCommandBuffers &&
-           vkBeginCommandBuffer && vkEndCommandBuffer && vkCmdPipelineBarrier && vkCmdClearColorImage &&
-           vkCreateBuffer && vkDestroyBuffer && vkGetBufferMemoryRequirements && vkAllocateMemory && vkFreeMemory && vkBindBufferMemory &&
-           vkMapMemory && vkUnmapMemory && vkFlushMappedMemoryRanges && vkCmdCopyBuffer &&
-           vkCreateShaderModule && vkDestroyShaderModule &&
-           vkCreateRenderPass && vkDestroyRenderPass &&
-           vkCreateImageView && vkDestroyImageView &&
-           vkCreateFramebuffer && vkDestroyFramebuffer &&
-           vkCreatePipelineLayout && vkDestroyPipelineLayout &&
-           vkCreateGraphicsPipelines && vkDestroyPipeline &&
-           vkCmdBeginRenderPass && vkCmdEndRenderPass &&
-           vkCmdBindPipeline && vkCmdBindVertexBuffers && vkCmdBindIndexBuffer &&
-           vkCmdSetViewport && vkCmdSetScissor &&
-           vkCmdDraw && vkCmdDrawIndexed && vkCmdPushConstants;
-}
 
 static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     if (r->phys != VK_NULL_HANDLE && r->device != VK_NULL_HANDLE) {
@@ -575,7 +184,7 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     r->device = device;
     r->queue_family_index = chosen_qfi;
 
-    if (!ne_vk_load_device_fns(r)) {
+    if (!ne_vk_load_device_fns(r->device)) {
         NE_LOG_ERROR("failed to load Vulkan device functions");
         return false;
     }
@@ -634,7 +243,6 @@ static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
 }
 
 /* ── Framebuffer helpers ───────────────────────────────────────────────── */
-
 static void ne_vk_destroy_framebuffers(NERenderSurface *surface) {
     NERenderer *r = surface->renderer;
     if (surface->framebuffers) {
@@ -1088,7 +696,7 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    if (!ne_vk_load_loader(r)) {
+    if (!ne_vk_load_loader(&r->vulkan_lib)) {
         ne_renderer_destroy(r);
         return NULL;
     }
@@ -1193,7 +801,7 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         return NULL;
     }
 
-    if (!ne_vk_load_instance_fns(r)) {
+    if (!ne_vk_load_instance_fns(r->instance)) {
         NE_LOG_ERROR("failed to load Vulkan instance functions");
         ne_renderer_destroy(r);
         return NULL;
@@ -1269,19 +877,7 @@ void ne_renderer_destroy(NERenderer *r) {
     }
     ne_pool_destroy(&r->buffers);
 
-    /* Destroy all live shaders. */
-    for (uint32_t i = 0; i < r->shaders.cap; i++) {
-        NEVulkanShaderSlot *sslot = &((NEVulkanShaderSlot*)r->shaders.slots)[i];
-        if (sslot->occupied) {
-            if (sslot->module != VK_NULL_HANDLE) {
-                vkDestroyShaderModule(r->device, sslot->module, NULL);
-            }
-            free(sslot->entry_point);
-            sslot->entry_point = NULL;
-            sslot->stage       = 0;
-        }
-    }
-    ne_pool_destroy(&r->shaders);
+    ne_shader_destroy_all(r);
 
     /* Destroy all live pipelines. */
     for (uint32_t i = 0; i < r->pipelines.cap; i++) {
@@ -1342,7 +938,6 @@ void ne_renderer_destroy(NERenderer *r) {
     }
 
     if (r == g_renderer_singleton) {
-        glslang_finalize_process();
         g_renderer_singleton = NULL;
     }
 
@@ -2474,210 +2069,6 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
     ne_pool_free(&renderer->buffers, slot_index, sizeof(NEVulkanBufferSlot));
 }
 
-/* ========================================================================
- * Shader Management
- * ======================================================================== */
-
-/*
- * SHADER ARCHITECTURE
- *
- * Each VkShaderModule wraps a single SPIR-V blob.  After creation the module
- * is opaque — the entry point name and stage are NOT stored inside it.  We
- * strdup the entry point here so that pipeline creation can read both back
- * from the slot without requiring the caller to keep the original descriptor
- * alive.
- *
- * SPIR-V alignment contract
- * ─────────────────────────
- * vkCreateShaderModule requires:
- *   - pCode  : pointer to uint32_t-aligned memory
- *   - codeSize : a multiple of 4 bytes
- * We validate the size.  The pointer cast from (const void *) to
- * (const uint32_t *) is safe because ne_file_read() (malloc) guarantees at
- * least sizeof(void *) alignment, which is ≥ 4 on all supported platforms
- * (x86-64 Windows).
- *
- * Runtime source compilation
- * ──────────────────────────
- * The API header documents a future Slang → SPIR-V path.  Until Slang is
- * integrated, ne_shader_create_from_source() is an explicit no-op stub: it
- * logs a clear actionable warning and returns NE_SHADER_HANDLE_NULL.  This
- * mirrors the Metal backend's compute pipeline stubs exactly, making the
- * future integration point obvious.
- */
-
-NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) {
-    if (!renderer || !desc || !desc->bytecode || desc->bytecode_size == 0 || !desc->entry_point) {
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    if (desc->bytecode_size % 4 != 0) {
-        NE_LOG_ERROR("ne_shader_create: SPIR-V bytecode size (%zu) must be a multiple of 4",
-                     desc->bytecode_size);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    VkShaderModuleCreateInfo smci;
-    memset(&smci, 0, sizeof(smci));
-    smci.sType    = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
-    smci.codeSize = desc->bytecode_size;
-    /* Cast is safe — see alignment note above. */
-    smci.pCode    = (const uint32_t *)desc->bytecode;
-
-    VkShaderModule module = VK_NULL_HANDLE;
-    const VkResult vr = vkCreateShaderModule(renderer->device, &smci, NULL, &module);
-    if (vr != VK_SUCCESS || module == VK_NULL_HANDLE) {
-        NE_LOG_ERROR("vkCreateShaderModule failed (vr=%d)", (int)vr);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    const uint32_t slot_index = ne_pool_alloc(&renderer->shaders, sizeof(NEVulkanShaderSlot));
-
-    if (slot_index == UINT32_MAX) {
-        NE_LOG_ERROR("ne_shader_create: shader pool allocation failed");
-        vkDestroyShaderModule(renderer->device, module, NULL);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    NEVulkanShaderSlot *slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[slot_index];
-    slot->stage       = (uint32_t)desc->stage;
-    slot->module      = module;
-    slot->entry_point = _strdup(desc->entry_point);
-
-    if (!slot->entry_point) {
-        NE_LOG_ERROR("ne_shader_create: out of memory copying entry point name");
-        vkDestroyShaderModule(renderer->device, module, NULL);
-        slot->occupied = false;
-        renderer->shaders.count--;
-        slot->module   = VK_NULL_HANDLE;
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    return (NEShaderHandle){ .id = slot_index + 1 };
-}
-
-NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc) {
-    if (!renderer || !desc || (!desc->source && !desc->filename) || !desc->entry_point) {
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    const char *filename = desc->filename;
-
-    glslang_stage_t stage = {};
-    if(desc->stage == NE_SHADER_STAGE_VERTEX) stage = GLSLANG_STAGE_VERTEX;
-    else if(desc->stage == NE_SHADER_STAGE_FRAGMENT) stage = GLSLANG_STAGE_FRAGMENT;
-    else if(desc->stage == NE_SHADER_STAGE_COMPUTE) stage = GLSLANG_STAGE_COMPUTE;
-    else { return NE_SHADER_HANDLE_NULL;}
-
-    static bool glslang_ready = false;
-    if (!glslang_ready) {
-        glslang_initialize_process();
-        glslang_ready = true;
-    }
-
-    size_t size = 0;
-    void *src = ne_file_read(filename, &size);
-
-    glslang_input_t input = {
-	.language = GLSLANG_SOURCE_GLSL,
-    .client = GLSLANG_CLIENT_VULKAN,
-    .client_version = GLSLANG_TARGET_VULKAN_1_3,
-    .target_language = GLSLANG_TARGET_SPV,
-    .target_language_version = GLSLANG_TARGET_SPV_1_6,
-    .default_profile = GLSLANG_NO_PROFILE,
-	.default_version = 450,
-    .stage = stage,
-    .code = src,
-    .force_default_version_and_profile = false,
-    .forward_compatible = false,
-    .messages = GLSLANG_MSG_DEFAULT_BIT | GLSLANG_MSG_DEBUG_INFO_BIT,
-    .resource = glslang_default_resource(),
-};
-
-    glslang_shader_t *shader = glslang_shader_create(&input);
-	glslang_shader_set_entry_point(shader, desc->entry_point);
-
-	if (!glslang_shader_preprocess(shader, &input))	{
-		NE_LOG_ERROR("GLSL preprocessing failed %s\n", filename);
-		NE_LOG_ERROR("%s\n", glslang_shader_get_info_log(shader));
-		NE_LOG_ERROR("%s\n", glslang_shader_get_info_debug_log(shader));
-		NE_LOG_ERROR("%s\n", input.code);
-		glslang_shader_delete(shader);
-		return NE_SHADER_HANDLE_NULL;
-	}
-
-    if (!glslang_shader_parse(shader, &input)) {
-        NE_LOG_ERROR("GLSL parsing failed %s\n", filename);
-        NE_LOG_ERROR("%s\n", glslang_shader_get_info_log(shader));
-        NE_LOG_ERROR("%s\n", glslang_shader_get_info_debug_log(shader));
-        NE_LOG_ERROR("%s\n", glslang_shader_get_preprocessed_code(shader));
-        glslang_shader_delete(shader);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-	glslang_program_t* program = glslang_program_create();
-    glslang_program_add_shader(program, shader);
-
-    if (!glslang_program_link(program, GLSLANG_MSG_SPV_RULES_BIT | GLSLANG_MSG_VULKAN_RULES_BIT)) {
-        NE_LOG_ERROR("GLSL linking failed %s\n", filename);
-        NE_LOG_ERROR("%s\n", glslang_program_get_info_log(program));
-        NE_LOG_ERROR("%s\n", glslang_program_get_info_debug_log(program));
-        glslang_program_delete(program);
-        glslang_shader_delete(shader);
-        return NE_SHADER_HANDLE_NULL;
-    }
-
-    glslang_program_SPIRV_generate(program, stage);
-
-    size_t sprv_size = glslang_program_SPIRV_get_size(program) * sizeof(uint32_t);
-    void* sprv_bytes = malloc(sprv_size);
-    glslang_program_SPIRV_get(program, sprv_bytes);
-
-    const char* spirv_messages = glslang_program_SPIRV_get_messages(program);
-    if (spirv_messages) NE_LOG_INFO("(%s) %s\b", filename, spirv_messages);
-
-    const NEShaderHandle handle = ne_shader_create(renderer, &(NEShaderDesc){
-        .stage         = desc->stage,
-        .bytecode      = sprv_bytes,
-        .bytecode_size = sprv_size,
-        .entry_point   = desc->entry_point,
-    });
-
-    free(sprv_bytes);
-    glslang_program_delete(program);
-    glslang_shader_delete(shader);
-    ne_file_free(src);
-
-    return handle;
-}
-
-void ne_renderer_set_shader_optimization(NERenderer *renderer, NEShaderOptimization level) {
-    if (renderer) {
-        renderer->shader_optimization = level;
-    }
-}
-
-void ne_shader_destroy(NERenderer *renderer, NEShaderHandle handle) {
-    if (!renderer || !ne_shader_handle_valid(handle)) {
-        return;
-    }
-
-    const uint32_t index = handle.id - 1;
-    if (index >= renderer->shaders.cap || !((NEVulkanShaderSlot*)renderer->shaders.slots)[index].occupied) {
-        NE_LOG_WARN("ne_shader_destroy: invalid or already-destroyed shader handle (id=%u)",
-                    handle.id);
-        return;
-    }
-
-    NEVulkanShaderSlot *slot = &((NEVulkanShaderSlot*)renderer->shaders.slots)[index];
-
-    free(slot->entry_point);
-    vkDestroyShaderModule(renderer->device, slot->module, NULL);
-    slot->entry_point = NULL;
-    slot->stage       = 0;
-
-    ne_pool_free(&renderer->shaders, index, sizeof(NEVulkanShaderSlot));
-}
 
 /* ========================================================================
  * Pipeline Management

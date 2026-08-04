@@ -20,6 +20,9 @@ SRC_C += src/renderer/vulkan/ne_renderer_vulkan.c
 SRC_C += src/renderer/vulkan/ne_swapchain_vulkan_wsi.c
 SRC_C += src/renderer/vulkan/ne_swapchain_dxgi.c
 
+# internal
+SRC_C += src/renderer/vulkan/internal/ne_vulkan_shaders.c
+
 # --- Compile flags --------------------------------------------------------
 CFLAGS += -D_CRT_SECURE_NO_WARNINGS
 CFLAGS += -DUNICODE -D_UNICODE
