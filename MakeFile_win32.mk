@@ -21,7 +21,11 @@ SRC_C += src/renderer/vulkan/ne_swapchain_vulkan_wsi.c
 SRC_C += src/renderer/vulkan/ne_swapchain_dxgi.c
 
 # internal
+SRC_C += src/renderer/vulkan/internal/ne_vulkan_renderer.c
+SRC_C += src/renderer/vulkan/internal/ne_vulkan_buffers.c
+SRC_C += src/renderer/vulkan/internal/ne_vulkan_images.c
 SRC_C += src/renderer/vulkan/internal/ne_vulkan_shaders.c
+SRC_C += src/renderer/vulkan/internal/ne_vulkan_pipelines.c
 
 # --- Compile flags --------------------------------------------------------
 CFLAGS += -D_CRT_SECURE_NO_WARNINGS

@@ -1,7 +1,11 @@
 #ifndef INTERNAL_NE_VULKAN_PIPELINES_H
 #define INTERNAL_NE_VULKAN_PIPELINES_H
 
+#define VK_NO_PROTOTYPES
+#define VK_USE_PLATFORM_WIN32_KHR
 #include "vulkan/vulkan.h"
+
+#include "ne_renderer_pipeline.h"
 
 /* ── Pipeline resource pool ─────────────────────────────────────────────── */
 typedef struct NEVulkanPipelineSlot {
@@ -31,5 +35,9 @@ typedef struct NEVulkanPipelineSlot {
     /* Created during deferred compilation (VK_NULL_HANDLE until then). */
     VkPipeline pipeline;
 } NEVulkanPipelineSlot;
+
+bool ne_vk_pipeline_compile(NERenderer *r, NEVulkanPipelineSlot *slot, VkRenderPass render_pass);
+
+void ne_pipeline_destroy_all(NERenderer *r);
 
 #endif //INTERNAL_NE_VULKAN_PIPELINES_H

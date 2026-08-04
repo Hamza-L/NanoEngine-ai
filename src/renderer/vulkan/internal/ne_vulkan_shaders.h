@@ -13,8 +13,6 @@ typedef struct NEVulkanShaderSlot {
     char *entry_point;          /* entry point name */
 } NEVulkanShaderSlot;
 
-// Null handles are silently ignored.
 void ne_shader_destroy_all(NERenderer *renderer);
-
 
 #endif //INTERNAL_NE_VULKAN_SHADERS_H
