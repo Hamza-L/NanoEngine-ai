@@ -43,14 +43,14 @@ typedef enum NESwapchainPresentResult {
 /* Interface                                                                */
 /* ======================================================================== */
 
-typedef struct NESwapchainI NESwapchainI;
+typedef struct NESwapchain NESwapchain;
 
 typedef struct NESwapchainOps {
     /*
      * Destroy the swapchain and free all resources.
      * After this call, the pointer is invalid.
      */
-    void (*destroy)(NESwapchainI *sc);
+    void (*destroy)(NESwapchain *sc);
 
     /*
      * Recreate the swapchain (typically after a resize or format change).
@@ -58,7 +58,7 @@ typedef struct NESwapchainOps {
      * Returns true on success. On failure, the swapchain is in an
      * indeterminate state and should be destroyed.
      */
-    bool (*recreate)(NESwapchainI *sc);
+    bool (*recreate)(NESwapchain *sc);
 
     /*
      * Acquire the next presentable image.
@@ -72,7 +72,7 @@ typedef struct NESwapchainOps {
      * Returns OUT_OF_DATE if the swapchain needs recreation.
      * Returns FAILED on unrecoverable error.
      */
-    NESwapchainAcquireResult (*acquire)(NESwapchainI *sc, VkSemaphore signal_sem);
+    NESwapchainAcquireResult (*acquire)(NESwapchain *sc, VkSemaphore signal_sem);
 
     /*
      * Present the previously acquired image.
@@ -85,7 +85,7 @@ typedef struct NESwapchainOps {
      * Returns OUT_OF_DATE if the swapchain needs recreation.
      * Returns FAILED on unrecoverable error.
      */
-    NESwapchainPresentResult (*present)(NESwapchainI *sc, VkQueue queue, VkSemaphore wait_sem);
+    NESwapchainPresentResult (*present)(NESwapchain *sc, VkQueue queue, VkSemaphore wait_sem);
 } NESwapchainOps;
 
 /*
@@ -94,7 +94,7 @@ typedef struct NESwapchainOps {
  * All backends "inherit" from this by placing it as the first field.
  * The renderer reads these fields directly — they are the contract.
  */
-struct NESwapchainI {
+struct NESwapchain {
     const NESwapchainOps *ops;
 
     /* Current swapchain state (updated on create/recreate). */
@@ -130,7 +130,7 @@ typedef struct NESwapchainVulkanWSIDesc {
  * This is the default presentation path.
  * Returns NULL on failure.
  */
-NESwapchainI *ne_swapchain_vulkan_wsi_create(const NESwapchainVulkanWSIDesc *desc);
+NESwapchain *ne_swapchain_vulkan_wsi_create(const NESwapchainVulkanWSIDesc *desc);
 
 /* ======================================================================== */
 /* DXGI + DirectComposition backend                                         */
@@ -153,6 +153,6 @@ typedef struct NESwapchainDXGIDesc {
  *
  * Returns NULL on failure.
  */
-NESwapchainI *ne_swapchain_dxgi_create(const NESwapchainDXGIDesc *desc);
+NESwapchain *ne_swapchain_dxgi_create(const NESwapchainDXGIDesc *desc);
 
 #endif /* NE_SWAPCHAIN_H */

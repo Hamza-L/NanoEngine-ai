@@ -265,14 +265,6 @@ int main(void) {
         return 1;
     }
 
-    /*
-     * Resource creation timing differs by platform:
-     *  - Native (Metal/Vulkan): the device exists synchronously, so create the
-     *    pipeline and vertex buffer up front here.
-     *  - Web (WebGPU): the device is acquired asynchronously and is NOT ready at
-     *    this point, so resources are created lazily on the first frame (see
-     *    on_frame_update). Skip eager creation; the handles start null.
-     */
     NEPipelineHandle pipeline = NE_PIPELINE_HANDLE_NULL;
     NEBufferHandle vbo = NE_BUFFER_HANDLE_NULL;
 #ifndef __EMSCRIPTEN__

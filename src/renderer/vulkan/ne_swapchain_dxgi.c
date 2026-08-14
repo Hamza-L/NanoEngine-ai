@@ -129,7 +129,7 @@ static PFN_vkGetMemoryWin32HandlePropertiesKHR s_vkGetMemoryWin32HandlePropertie
 /* ── Backend-specific data ─────────────────────────────────────────────── */
 
 typedef struct NESwapchainDXGI {
-    NESwapchainI base;
+    NESwapchain base;
 
     VkDevice device;
     VkPhysicalDevice phys;
@@ -174,7 +174,7 @@ static uint32_t ne_dxgi_find_memory_type(NESwapchainDXGI *sc, uint32_t type_filt
 }
 
 static void ne_dxgi_release_vk_images(NESwapchainDXGI *sc) {
-    NESwapchainI *base = &sc->base;
+    NESwapchain *base = &sc->base;
 
     if (base->image_views) {
         for (uint32_t i = 0; i < base->image_count; i++) {
@@ -227,7 +227,7 @@ static void ne_dxgi_release_vk_images(NESwapchainDXGI *sc) {
  *   VkImportMemoryWin32HandleInfoKHR → vkAllocateMemory → vkBindImageMemory
  */
 static bool ne_dxgi_import_buffers(NESwapchainDXGI *sc) {
-    NESwapchainI *base = &sc->base;
+    NESwapchain *base = &sc->base;
     HRESULT hr;
 
     base->images = (VkImage *)calloc(NE_DXGI_BUFFER_COUNT, sizeof(VkImage));
@@ -405,7 +405,7 @@ static bool ne_dxgi_import_buffers(NESwapchainDXGI *sc) {
 }
 
 static bool ne_dxgi_build(NESwapchainDXGI *sc) {
-    NESwapchainI *base = &sc->base;
+    NESwapchain *base = &sc->base;
     HRESULT hr;
 
     HWND hwnd = (HWND)ne_window_get_native_handle(sc->window, NE_NATIVE_HANDLE_WIN32_HWND);
@@ -595,7 +595,7 @@ static bool ne_dxgi_build(NESwapchainDXGI *sc) {
 
 /* ── Interface implementation ──────────────────────────────────────────── */
 
-static void ne_swapchain_dxgi_destroy(NESwapchainI *iface) {
+static void ne_swapchain_dxgi_destroy(NESwapchain *iface) {
     NESwapchainDXGI *sc = (NESwapchainDXGI *)iface;
 
     vkDeviceWaitIdle(sc->device);
@@ -618,7 +618,7 @@ static void ne_swapchain_dxgi_destroy(NESwapchainI *iface) {
     free(sc);
 }
 
-static bool ne_swapchain_dxgi_recreate(NESwapchainI *iface) {
+static bool ne_swapchain_dxgi_recreate(NESwapchain *iface) {
     NESwapchainDXGI *sc = (NESwapchainDXGI *)iface;
 
     vkDeviceWaitIdle(sc->device);
@@ -652,7 +652,7 @@ static bool ne_swapchain_dxgi_recreate(NESwapchainI *iface) {
     return true;
 }
 
-static NESwapchainAcquireResult ne_swapchain_dxgi_acquire(NESwapchainI *iface, VkSemaphore signal_sem) {
+static NESwapchainAcquireResult ne_swapchain_dxgi_acquire(NESwapchain *iface, VkSemaphore signal_sem) {
     NESwapchainDXGI *sc = (NESwapchainDXGI *)iface;
     (void)signal_sem;
 
@@ -685,7 +685,7 @@ static NESwapchainAcquireResult ne_swapchain_dxgi_acquire(NESwapchainI *iface, V
     return NE_SWAPCHAIN_ACQUIRE_SUCCESS;
 }
 
-static NESwapchainPresentResult ne_swapchain_dxgi_present(NESwapchainI *iface, VkQueue queue, VkSemaphore wait_sem) {
+static NESwapchainPresentResult ne_swapchain_dxgi_present(NESwapchain *iface, VkQueue queue, VkSemaphore wait_sem) {
     NESwapchainDXGI *sc = (NESwapchainDXGI *)iface;
     (void)queue;
     (void)wait_sem;
@@ -751,7 +751,7 @@ static const NESwapchainOps g_swapchain_dxgi_ops = {
 
 /* ── Public constructor ────────────────────────────────────────────────── */
 
-NESwapchainI *ne_swapchain_dxgi_create(const NESwapchainDXGIDesc *desc) {
+NESwapchain *ne_swapchain_dxgi_create(const NESwapchainDXGIDesc *desc) {
     if (!desc || !desc->device || !desc->phys || !desc->instance || !desc->window) {
         return NULL;
     }

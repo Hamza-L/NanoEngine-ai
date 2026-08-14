@@ -31,7 +31,7 @@ extern PFN_vkDeviceWaitIdle vkDeviceWaitIdle;
 /* ── Backend-specific data ─────────────────────────────────────────────── */
 
 typedef struct NESwapchainVulkanWSI {
-    NESwapchainI base;
+    NESwapchain base;
 
     VkDevice device;
     VkPhysicalDevice phys;
@@ -89,7 +89,7 @@ static VkPresentModeKHR ne_choose_present_mode(const VkPresentModeKHR *modes, ui
 
 /* Free image views and per-image sync objects (not the VkSwapchainKHR itself). */
 static void ne_swapchain_wsi_cleanup_images(NESwapchainVulkanWSI *sc) {
-    NESwapchainI *base = &sc->base;
+    NESwapchain *base = &sc->base;
 
     if (base->image_views) {
         for (uint32_t i = 0; i < base->image_count; i++) {
@@ -122,7 +122,7 @@ static void ne_swapchain_wsi_cleanup_images(NESwapchainVulkanWSI *sc) {
 /* Core swapchain creation logic. If old_swapchain is provided, it's passed to
  * vkCreateSwapchainKHR for resource recycling and then destroyed. */
 static bool ne_swapchain_wsi_build(NESwapchainVulkanWSI *sc, VkSwapchainKHR old_swapchain) {
-    NESwapchainI *base = &sc->base;
+    NESwapchain *base = &sc->base;
 
     int32_t fb_w = 0, fb_h = 0;
     if (!ne_window_get_framebuffer_size(sc->window, &fb_w, &fb_h)) return false;
@@ -314,7 +314,7 @@ static bool ne_swapchain_wsi_build(NESwapchainVulkanWSI *sc, VkSwapchainKHR old_
 
 /* ── Interface implementation ──────────────────────────────────────────── */
 
-static void ne_swapchain_wsi_destroy(NESwapchainI *iface) {
+static void ne_swapchain_wsi_destroy(NESwapchain *iface) {
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
 
     vkDeviceWaitIdle(sc->device);
@@ -329,7 +329,7 @@ static void ne_swapchain_wsi_destroy(NESwapchainI *iface) {
     free(sc);
 }
 
-static bool ne_swapchain_wsi_recreate(NESwapchainI *iface) {
+static bool ne_swapchain_wsi_recreate(NESwapchain *iface) {
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
 
     vkDeviceWaitIdle(sc->device);
@@ -342,7 +342,7 @@ static bool ne_swapchain_wsi_recreate(NESwapchainI *iface) {
     return ne_swapchain_wsi_build(sc, old);
 }
 
-static NESwapchainAcquireResult ne_swapchain_wsi_acquire(NESwapchainI *iface, VkSemaphore signal_sem) {
+static NESwapchainAcquireResult ne_swapchain_wsi_acquire(NESwapchain *iface, VkSemaphore signal_sem) {
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
 
     uint32_t image_index = 0;
@@ -363,7 +363,7 @@ static NESwapchainAcquireResult ne_swapchain_wsi_acquire(NESwapchainI *iface, Vk
     return NE_SWAPCHAIN_ACQUIRE_SUCCESS;
 }
 
-static NESwapchainPresentResult ne_swapchain_wsi_present(NESwapchainI *iface, VkQueue queue, VkSemaphore wait_sem) {
+static NESwapchainPresentResult ne_swapchain_wsi_present(NESwapchain *iface, VkQueue queue, VkSemaphore wait_sem) {
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
 
     uint32_t image_index = iface->acquired_image_index;
@@ -403,7 +403,7 @@ static const NESwapchainOps g_swapchain_vulkan_wsi_ops = {
 
 /* ── Public constructor ────────────────────────────────────────────────── */
 
-NESwapchainI *ne_swapchain_vulkan_wsi_create(const NESwapchainVulkanWSIDesc *desc) {
+NESwapchain *ne_swapchain_vulkan_wsi_create(const NESwapchainVulkanWSIDesc *desc) {
     if (!desc || !desc->device || !desc->phys || !desc->surface || !desc->window) {
         return NULL;
     }
@@ -428,12 +428,12 @@ NESwapchainI *ne_swapchain_vulkan_wsi_create(const NESwapchainVulkanWSIDesc *des
 
 /* ── Accessors for renderer compatibility ──────────────────────────────── */
 
-VkFence *ne_swapchain_vulkan_wsi_get_images_in_flight(NESwapchainI *iface) {
+VkFence *ne_swapchain_vulkan_wsi_get_images_in_flight(NESwapchain *iface) {
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
     return sc->images_in_flight;
 }
 
-VkSemaphore ne_swapchain_vulkan_wsi_get_render_finished_sem(NESwapchainI *iface, uint32_t image_index) {
+VkSemaphore ne_swapchain_vulkan_wsi_get_render_finished_sem(NESwapchain *iface, uint32_t image_index) {
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
     if (image_index >= iface->image_count) return VK_NULL_HANDLE;
     return sc->sem_render_finished[image_index];

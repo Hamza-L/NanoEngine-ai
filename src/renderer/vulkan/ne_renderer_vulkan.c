@@ -30,8 +30,8 @@
 #include "internal/ne_vulkan_renderer.h"
 
 /* Forward declare accessors from ne_swapchain_vulkan_wsi.c */
-VkFence *ne_swapchain_vulkan_wsi_get_images_in_flight(NESwapchainI *iface);
-VkSemaphore ne_swapchain_vulkan_wsi_get_render_finished_sem(NESwapchainI *iface, uint32_t image_index);
+VkFence *ne_swapchain_vulkan_wsi_get_images_in_flight(NESwapchain *iface);
+VkSemaphore ne_swapchain_vulkan_wsi_get_render_finished_sem(NESwapchain *iface, uint32_t image_index);
 
 NERenderer *g_renderer_singleton = NULL;
 
@@ -47,7 +47,7 @@ struct NERenderSurface {
     NEWindow *window;
 
     VkSurfaceKHR surface;
-    NESwapchainI *swapchain;
+    NESwapchain *swapchain;
     NEPresentBackend present_backend;
     VkRenderPass render_pass;
     VkFramebuffer *framebuffers;
@@ -246,7 +246,7 @@ static void ne_vk_destroy_framebuffers(NERenderSurface *surface) {
 
 static bool ne_vk_build_framebuffers(NERenderSurface *surface) {
     NERenderer *r = surface->renderer;
-    NESwapchainI *sc = surface->swapchain;
+    NESwapchain *sc = surface->swapchain;
 
     ne_vk_destroy_framebuffers(surface);
 
@@ -852,7 +852,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
         return NULL;
     }
 
-    NESwapchainI *sc = surface->swapchain;
+    NESwapchain *sc = surface->swapchain;
 
     if (!sc || sc->needs_recreate) {
         if (!ne_vk_surface_ensure_swapchain(surface)) {
@@ -977,7 +977,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
         return;
     }
 
-    NESwapchainI *sc = surface->swapchain;
+    NESwapchain *sc = surface->swapchain;
 
     /* ── Close the render pass and command buffer ────────────────────── */
 
