@@ -92,13 +92,19 @@ $(STB_IMAGE_HEADER):
 	@$(call mkdir_p,$(STB_DIR))
 	@curl -sSfL -o "$(STB_IMAGE_HEADER)" "$(STB_IMAGE_URL)"
 
-# Preflight tool check — parse-time, fails fast with an install hint before any
-# recipe runs. $(1) = binary, $(2) = expected substring in `--version` output
-# (proves the tool actually ran), $(3) = install hint shown on failure.
-# NOTE: commas in $(3) must be written as $(comma) — $(call) splits on ",".
+# Preflight checks — parse-time, fail fast with an install hint before any
+# recipe runs. NOTE: commas in the hint must be written as $(comma) —
+# $(call) splits on ",".
 comma := ,
+# $(1) = binary, $(2) = expected substring in `--version`, $(3) = install hint.
 define require_tool
 $(if $(findstring $(2),$(shell $(1) --version 2>&1)),,$(error Missing required tool '$(1)'. $(3)))
+endef
+# $(1) = label for the error, $(2) = probe command, $(3) = expected substring
+# in its output, $(4) = install hint. Use when --version doesn't fit (custom
+# subcommand, tools without --version, or output filtering).
+define require_probe
+$(if $(findstring $(3),$(shell $(2) 2>&1)),,$(error Missing $(1). $(4)))
 endef
 
 # Cross-platform tools needed before we even reach the platform include.
