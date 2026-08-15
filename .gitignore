@@ -1,6 +1,4 @@
 build/
 .cache
-external/deps
-external/glslang
-external/vulkan-headers
+external
 compile_commands.json

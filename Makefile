@@ -78,6 +78,19 @@ OBJ_EXT := o
 mkdir_p = mkdir -p "$(1)"
 rmdir_rf = rm -rf "$(1)"
 
+# --- Dependencies: stb_image (single-header) ------------------------------
+STB_IMAGE_COMMIT ?= 013ac3beddff3dbffafd5177e7972067cd2b5083
+STB_DIR := external/stb
+STB_IMAGE_HEADER := $(STB_DIR)/stb_image.h
+STB_IMAGE_URL := https://raw.githubusercontent.com/nothings/stb/$(STB_IMAGE_COMMIT)/stb_image.h
+
+EXTRA_OBJECT_DEPS += $(STB_IMAGE_HEADER)
+
+$(STB_IMAGE_HEADER):
+	@echo "DEPS stb_image ($(STB_IMAGE_COMMIT))"
+	@$(call mkdir_p,$(STB_DIR))
+	@curl -sSfL -o "$(STB_IMAGE_HEADER)" "$(STB_IMAGE_URL)"
+
 # Web (Emscripten/WebGPU) is an explicit opt-in: `make PLATFORM=web`.
 ifeq ($(PLATFORM),web)
 include MakeFile_emscripten.mk
