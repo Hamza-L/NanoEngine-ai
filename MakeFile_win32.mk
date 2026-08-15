@@ -105,16 +105,53 @@ $(SPIRV_FRAG): shaders/glsl/basic.frag $(GLSLANG_HEADER_MARKER)
 
 EXTRA_OBJECT_DEPS += $(SPIRV_VERT) $(SPIRV_FRAG)
 
-# --- Dependency download rules --------------------------------------------
-.PHONY: deps deps-vulkan-headers deps-shaders deps-glslang
+# --- Dependencies: FreeType (built from upstream source) ------------------
+# Built once via CMake+MSBuild; the produced .lib is the marker, so a second
+# `make` sees the lib and skips fetch/configure/compile entirely. CRT is /MDd
+# to match the top-level build.
+FREETYPE_VERSION ?= 2.13.3
+FREETYPE_SRC_DIR := external/freetype-src
+FREETYPE_BUILD_DIR := external/freetype-build
+FREETYPE_DIR := external/freetype
+FREETYPE_INCLUDE_DIR := $(FREETYPE_DIR)/include/freetype2
+FREETYPE_LIB := $(FREETYPE_DIR)/lib/freetyped.lib
+FREETYPE_TARBALL := external/deps/freetype-$(FREETYPE_VERSION).tar.gz
+FREETYPE_URL := https://download.savannah.gnu.org/releases/freetype/freetype-$(FREETYPE_VERSION).tar.gz
 
-deps: deps-vulkan-headers deps-shaders deps-glslang
+EXTRA_OBJECT_DEPS += $(FREETYPE_LIB)
+CFLAGS += -I$(FREETYPE_INCLUDE_DIR)
+LDLIBS += $(FREETYPE_LIB)
+
+$(FREETYPE_LIB):
+	@echo "DEPS FreeType v$(FREETYPE_VERSION) (building from source)"
+	@$(call mkdir_p,external/deps)
+	@powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(FREETYPE_URL)' -OutFile '$(FREETYPE_TARBALL)'"
+	@tar -xzf $(FREETYPE_TARBALL) -C external/deps
+	@powershell -NoProfile -Command "if (Test-Path '$(FREETYPE_SRC_DIR)') { Remove-Item -Recurse -Force '$(FREETYPE_SRC_DIR)' }"
+	@powershell -NoProfile -Command "Move-Item -Force 'external/deps/freetype-$(FREETYPE_VERSION)' '$(FREETYPE_SRC_DIR)'"
+	@cmake -S $(FREETYPE_SRC_DIR) -B $(FREETYPE_BUILD_DIR) -G "Visual Studio 17 2022" -A x64 \
+		-DCMAKE_INSTALL_PREFIX=$(CURDIR)/$(FREETYPE_DIR) \
+		-DCMAKE_MSVC_RUNTIME_LIBRARY=MultiThreadedDebugDLL \
+		-DBUILD_SHARED_LIBS=OFF \
+		-DFT_DISABLE_ZLIB=TRUE \
+		-DFT_DISABLE_BZIP2=TRUE \
+		-DFT_DISABLE_PNG=TRUE \
+		-DFT_DISABLE_HARFBUZZ=TRUE \
+		-DFT_DISABLE_BROTLI=TRUE
+	@cmake --build $(FREETYPE_BUILD_DIR) --config Debug --target install
+
+# --- Dependency download rules --------------------------------------------
+.PHONY: deps deps-vulkan-headers deps-shaders deps-glslang deps-freetype
+
+deps: deps-vulkan-headers deps-shaders deps-glslang deps-freetype
 
 deps-shaders: $(SPIRV_VERT) $(SPIRV_FRAG)
 
 deps-glslang: $(GLSLANG_HEADER_MARKER)
 
 deps-vulkan-headers: $(VULKAN_HEADERS_MARKER)
+
+deps-freetype: $(FREETYPE_LIB)
 
 $(GLSLANG_HEADER_MARKER):
 	@echo "DEPS glslang (downloading...)"
