@@ -12,13 +12,36 @@ mkdir_p = if not exist "$(subst /,\,$(patsubst %/,%,$(1)))" mkdir "$(subst /,\,$
 rmdir_rf = if exist "$(subst /,\,$(patsubst %/,%,$(1)))" rmdir /s /q "$(subst /,\,$(patsubst %/,%,$(1)))"
 endif
 
-# MSVC tools (link.exe) write scratch files under %TMP%. Under an MSYS2/Cygwin
-# shell that variable can point at a Unix-style path the MSVC tools reject.
-# Point both env vars at the build dir for every recipe.
+# MSVC tools (link.exe, MSBuild) write scratch files under %TMP%. Under an
+# MSYS2/Cygwin shell that variable can point at a Unix-style path the MSVC
+# tools reject; under a locked-down account it can be C:\Windows\... which is
+# not writable. Point both env vars at the build dir for every recipe.
 export TMP  := $(CURDIR)/build
 export TEMP := $(CURDIR)/build
 
 OBJ_EXT := obj
+
+# --- Preflight: fail fast with actionable messages ------------------------
+$(call require_tool,clang-cl,clang version,Ships with LLVM/Clang. Ensure the LLVM bin dir is on PATH.)
+$(call require_tool,cmake,cmake version,Install CMake from https://cmake.org/download/ (or `winget install Kitware.CMake`) and add it to PATH.)
+$(call require_tool,tar,tar,tar ships with Windows 10 build 17063+. Update Windows or install via Git for Windows.)
+
+# powershell has no --version flag on Windows PowerShell 5; probe via -Command.
+ifeq ($(shell powershell -NoProfile -Command "echo ok" 2>/dev/null),)
+$(error Missing required tool 'powershell'. PowerShell ships with Windows$(comma) so this usually means the PowerShell exe is not on PATH. Repair your Windows install or install PowerShell 7 from https://aka.ms/powershell.)
+endif
+
+# Probe that the MSVC linker is reachable — clang-cl invokes link.exe. When it
+# isn't found the failure is a bare LNK1181 with no hint about the environment.
+# `where` is a native cmd builtin; works whether make ran under cmd or bash.
+ifeq ($(shell where link.exe 2>nul),)
+$(error MSVC linker (link.exe) not found on PATH. Open an "x64 Native Tools Command Prompt for VS 2022" or run vcvars64.bat before invoking make. Requires Visual Studio 2022 or "Build Tools for Visual Studio 2022" with the Desktop C++ workload.)
+endif
+
+# CMake generator is hardcoded to VS 2022; probe that it can actually find one.
+ifeq ($(findstring Visual Studio 17 2022,$(shell cmake --help 2>&1)),)
+$(error Visual Studio 2022 generator not available to CMake. Install Visual Studio 2022 (any edition) or "Build Tools for Visual Studio 2022" with the Desktop C++ workload.)
+endif
 
 # --- Sources --------------------------------------------------------------
 SRC_C += src/platform/win32/window_win32.c

@@ -14,13 +14,30 @@
 
 OBJ_EXT := o
 
+# --- Preflight ------------------------------------------------------------
+# The web build's recipes are bash-based (sourcing emsdk_env.sh, `if [ -d ]`).
+# On Windows we require a POSIX shell (Git for Windows ships /bin/sh); on Unix
+# it is always present. Fail early with a clear message if it is missing.
+ifeq ($(IS_WINDOWS),1)
+ifeq ($(wildcard /bin/sh),)
+$(error PLATFORM=web on Windows requires a POSIX shell. Install Git for Windows (https://git-scm.com/downloads) and invoke make from Git Bash$(comma) or ensure C:\Program Files\Git\usr\bin is on PATH.)
+endif
+SHELL := /bin/sh
+endif
+
+# emsdk bootstraps itself, but it needs git to clone and python at runtime.
+$(call require_tool,git,git version,Install Git — https://git-scm.com/downloads (or your package manager).)
+$(call require_tool,python,Python,emsdk needs Python 3. Install from https://python.org or your package manager.)
+
 # --- Toolchain: Emscripten SDK (fetched if absent) ------------------------
 EMSDK_VERSION ?= 5.0.2
 EMSDK_DIR     ?= external/emsdk
 EMSDK_URL     ?= https://github.com/emscripten-core/emsdk.git
 
-# The emcc launcher inside the SDK is the marker that it is installed+activated.
-EMCC_BIN := $(EMSDK_DIR)/upstream/emscripten/emcc
+# Marker that the SDK is installed+activated. emcc.py is the platform-neutral
+# Python entry point that exists after `emsdk install` on every OS (the bare
+# `emcc` shell wrapper may be absent on Windows).
+EMCC_BIN := $(EMSDK_DIR)/upstream/emscripten/emcc.py
 EMSDK_ENV := $(EMSDK_DIR)/emsdk_env.sh
 
 # Invoke emcc through a sourced env so it finds its config + bundled node,

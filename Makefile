@@ -91,6 +91,19 @@ $(STB_IMAGE_HEADER):
 	@$(call mkdir_p,$(STB_DIR))
 	@curl -sSfL -o "$(STB_IMAGE_HEADER)" "$(STB_IMAGE_URL)"
 
+# Preflight tool check — parse-time, fails fast with an install hint before any
+# recipe runs. $(1) = binary, $(2) = expected substring in `--version` output
+# (proves the tool actually ran), $(3) = install hint shown on failure.
+# NOTE: commas in $(3) must be written as $(comma) — $(call) splits on ",".
+comma := ,
+define require_tool
+$(if $(findstring $(2),$(shell $(1) --version 2>&1)),,$(error Missing required tool '$(1)'. $(3)))
+endef
+
+# Cross-platform tools needed before we even reach the platform include.
+$(call require_tool,clang,clang version,Install LLVM/Clang from https://releases.llvm.org and put it on PATH.)
+$(call require_tool,curl,curl,curl ships with Windows 10+ and macOS. Install Git for Windows or your distro's curl package.)
+
 # Web (Emscripten/WebGPU) is an explicit opt-in: `make PLATFORM=web`.
 ifeq ($(PLATFORM),web)
 include MakeFile_emscripten.mk
