@@ -67,9 +67,10 @@ SHADERS_DIR := $(BUILD_DIR)/shaders
 LD := clang-cl
 
 # --- Link flags -----------------------------------------------------------
-# clang-cl link line shape:  <objs> -o <out> <LDFLAGS> -link <LDLIBS>
+# clang-cl link line: <objs> -o <out> <LDFLAGS> <LDLIBS>. -link is the last
+# LDFLAGS entry so everything in LDLIBS is forwarded to the MSVC linker.
 LDFLAGS += -Z7 -MDd
-LDLIBS_PREFIX := -link
+LDFLAGS += -link
 
 LDLIBS += user32.lib
 LDLIBS += gdi32.lib

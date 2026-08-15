@@ -140,11 +140,9 @@ test: $(APP_NAME)
 # User-facing target without extension.
 $(APP_NAME): $(OUTPUT)
 
-# LDLIBS_PREFIX is set by platform makefiles (Windows: `-link`) to route LDLIBS
-# through the MSVC linker; empty everywhere else.
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
-	$(Q)$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS) $(LDLIBS_PREFIX) $(LDLIBS)
+	$(Q)$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS) $(LDLIBS)
 
 $(BUILD_DIR):
 	$(Q)$(call mkdir_p,$(BUILD_DIR))
