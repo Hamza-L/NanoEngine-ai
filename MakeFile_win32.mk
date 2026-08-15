@@ -136,7 +136,7 @@ $(FREETYPE_LIB):
 	@$(call mkdir_p,external/deps)
 	@powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(FREETYPE_URL)' -OutFile '$(FREETYPE_TARBALL)'"
 	@tar -xzf $(FREETYPE_TARBALL) -C external/deps
-	@powershell -NoProfile -Command "if (Test-Path '$(FREETYPE_SRC_DIR)') { Remove-Item -Recurse -Force '$(FREETYPE_SRC_DIR)' }"
+	@$(call rmdir_rf,$(FREETYPE_SRC_DIR))
 	@powershell -NoProfile -Command "Move-Item -Force 'external/deps/freetype-$(FREETYPE_VERSION)' '$(FREETYPE_SRC_DIR)'"
 	@cmake -S $(FREETYPE_SRC_DIR) -B $(FREETYPE_BUILD_DIR) -G "Visual Studio 17 2022" -A x64 \
 		-DCMAKE_INSTALL_PREFIX=$(CURDIR)/$(FREETYPE_DIR) \
@@ -147,21 +147,9 @@ $(FREETYPE_LIB):
 		-DFT_DISABLE_PNG=TRUE \
 		-DFT_DISABLE_HARFBUZZ=TRUE \
 		-DFT_DISABLE_BROTLI=TRUE
-	@cmake --build $(FREETYPE_BUILD_DIR) --config Debug --target install
+	@cmake --build $(FREETYPE_BUILD_DIR) --config Debug --target install --parallel
 
 # --- Dependency download rules --------------------------------------------
-.PHONY: deps deps-vulkan-headers deps-shaders deps-glslang deps-freetype
-
-deps: deps-vulkan-headers deps-shaders deps-glslang deps-freetype
-
-deps-shaders: $(SPIRV_VERT) $(SPIRV_FRAG)
-
-deps-glslang: $(GLSLANG_HEADER_MARKER)
-
-deps-vulkan-headers: $(VULKAN_HEADERS_MARKER)
-
-deps-freetype: $(FREETYPE_LIB)
-
 $(GLSLANG_HEADER_MARKER):
 	@echo "DEPS glslang (downloading...)"
 	@$(call mkdir_p,external/deps)

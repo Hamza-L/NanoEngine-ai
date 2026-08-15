@@ -131,7 +131,11 @@ DEPS := $(OBJS:.$(OBJ_EXT)=.d)
 # Automatically include generated dependency files (if present).
 -include $(DEPS)
 
-.PHONY: all clean clean-full test $(APP_NAME)
+.PHONY: all clean clean-full test deps $(APP_NAME)
+
+# `make deps` fetches/builds every registered dependency without touching the
+# app itself — useful for populating external/ from a clean checkout.
+deps: $(EXTRA_OBJECT_DEPS)
 
 # Default build (same command on every platform):
 #   make
