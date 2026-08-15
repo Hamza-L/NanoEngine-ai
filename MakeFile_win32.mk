@@ -12,6 +12,12 @@ mkdir_p = if not exist "$(subst /,\,$(patsubst %/,%,$(1)))" mkdir "$(subst /,\,$
 rmdir_rf = if exist "$(subst /,\,$(patsubst %/,%,$(1)))" rmdir /s /q "$(subst /,\,$(patsubst %/,%,$(1)))"
 endif
 
+# MSVC tools (link.exe) write scratch files under %TMP%. Under an MSYS2/Cygwin
+# shell that variable can point at a Unix-style path the MSVC tools reject.
+# Point both env vars at the build dir for every recipe.
+export TMP  := $(CURDIR)/build
+export TEMP := $(CURDIR)/build
+
 OBJ_EXT := obj
 
 # --- Sources --------------------------------------------------------------
@@ -38,15 +44,19 @@ SHADERS_DIR := $(BUILD_DIR)/shaders
 LD := clang-cl
 
 # --- Link flags -----------------------------------------------------------
+# clang-cl link line shape:  <objs> -o <out> <LDFLAGS> -link <LDLIBS>
 LDFLAGS += -Z7 -MDd
-LDFLAGS += -link
-LDFLAGS += user32.lib
-LDFLAGS += gdi32.lib
-LDFLAGS += dwmapi.lib
-LDFLAGS += d3d11.lib
-LDFLAGS += dxgi.lib
+LDLIBS_PREFIX := -link
 
-LDASANFLAGS := clang_rt.asan-x86_64.lib
+LDLIBS += user32.lib
+LDLIBS += gdi32.lib
+LDLIBS += dwmapi.lib
+LDLIBS += d3d11.lib
+LDLIBS += dxgi.lib
+
+ifeq ($(ASAN),1)
+LDLIBS += clang_rt.asan-x86_64.lib
+endif
 
 # --- Dependencies: Vulkan-Headers (headers only) --------------------------
 VULKAN_HEADERS_VERSION ?= 1.3.280
@@ -60,21 +70,22 @@ EXTRA_OBJECT_DEPS += $(VULKAN_HEADERS_MARKER)
 CFLAGS += -I$(VULKAN_HEADERS_INCLUDE_DIR)
 
 # --- Dependencies: glslang (runtime GLSL -> SPIR-V compilation) -----------
+GLSLANG_VERSION ?= 16.5.0
 GLSLANG_DIR := external/glslang
 GLSLANG_INCLUDE_DIR := $(GLSLANG_DIR)/include/glslang/Include
 GLSLANG_HEADER_MARKER := $(GLSLANG_INCLUDE_DIR)/glslang_c_interface.h
-GLSLANG_ZIP := external/deps/glslang-binaries.zip
-GLSLANG_URL := https://github.com/KhronosGroup/glslang/releases/download/main-tot/glslang-master-windows-Release.zip
+GLSLANG_ZIP := external/deps/glslang-$(GLSLANG_VERSION).zip
+GLSLANG_URL := https://github.com/KhronosGroup/glslang/releases/download/$(GLSLANG_VERSION)/glslang-$(GLSLANG_VERSION)-windows-x86_64-release.zip
 
 EXTRA_OBJECT_DEPS += $(GLSLANG_HEADER_MARKER)
 CFLAGS += -I$(GLSLANG_INCLUDE_DIR)
-LDFLAGS += $(GLSLANG_DIR)/lib/glslang.lib
-LDFLAGS += $(GLSLANG_DIR)/lib/glslang-default-resource-limits.lib
-LDFLAGS += $(GLSLANG_DIR)/lib/SPIRV-Tools-opt.lib
-LDFLAGS += $(GLSLANG_DIR)/lib/SPIRV-Tools.lib
+LDLIBS += $(GLSLANG_DIR)/lib/glslang.lib
+LDLIBS += $(GLSLANG_DIR)/lib/glslang-default-resource-limits.lib
+LDLIBS += $(GLSLANG_DIR)/lib/SPIRV-Tools-opt.lib
+LDLIBS += $(GLSLANG_DIR)/lib/SPIRV-Tools.lib
 
-# --- SPIR-V shader compilation (local glslangValidator) -------------------
-GLSLANG_BIN := $(GLSLANG_DIR)/bin/glslangValidator.exe
+# --- SPIR-V shader compilation (local glslang) -------------------
+GLSLANG_BIN := $(GLSLANG_DIR)/bin/glslang.exe
 
 SPIRV_VERT := $(SHADERS_DIR)/basic.vert.spv
 SPIRV_FRAG := $(SHADERS_DIR)/basic.frag.spv
@@ -109,13 +120,13 @@ $(GLSLANG_HEADER_MARKER):
 	@echo "DEPS glslang (downloading...)"
 	@$(call mkdir_p,external/deps)
 	@$(call mkdir_p,$(GLSLANG_DIR))
-	@powershell -NoProfile -Command "$$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '$(GLSLANG_URL)' -OutFile '$(GLSLANG_ZIP)'"
+	@powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(GLSLANG_URL)' -OutFile '$(GLSLANG_ZIP)'"
 	@powershell -NoProfile -Command "Expand-Archive -Force '$(GLSLANG_ZIP)' '$(GLSLANG_DIR)'"
 
 $(VULKAN_HEADERS_MARKER):
 	@echo "DEPS Vulkan-Headers v$(VULKAN_HEADERS_VERSION)"
 	@$(call mkdir_p,$(BUILD_DIR)/deps)
-	@powershell -NoProfile -Command "$$ProgressPreference='SilentlyContinue'; Invoke-WebRequest -Uri '$(VULKAN_HEADERS_URL)' -OutFile '$(VULKAN_HEADERS_ZIP)'"
+	@powershell -NoProfile -Command "Invoke-WebRequest -Uri '$(VULKAN_HEADERS_URL)' -OutFile '$(VULKAN_HEADERS_ZIP)'"
 	@powershell -NoProfile -Command "Expand-Archive -Force '$(VULKAN_HEADERS_ZIP)' '$(BUILD_DIR)/deps'"
 	@powershell -NoProfile -Command "if (Test-Path '$(VULKAN_HEADERS_DIR)') { Remove-Item -Recurse -Force '$(VULKAN_HEADERS_DIR)' }"
 	@$(call mkdir_p,external)

@@ -43,10 +43,22 @@ TEST_OUTPUT := $(BUILD_DIR)/$(APP_NAME)_test$(EXE_EXT)
 # default goal stays consistent.
 .DEFAULT_GOAL := all
 
+# `make V=1` echoes the underlying compile/link commands.
+ifeq ($(V),1)
+Q :=
+else
+Q := @
+endif
+
 CFLAGS := -std=c23 -g -DDEBUG -Wall -Wextra -Wpedantic -Werror -DTESTING_ENABLED=$(TESTING_ENABLED)
 CFLAGS += -Iexternal
 OBJCFLAGS := -fobjc-arc
 LDFLAGS :=
+LDLIBS :=
+
+ifeq ($(ASAN),1)
+CFLAGS += -fsanitize=address -fno-omit-frame-pointer
+endif
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
 SRC_C := src/main.c src/ne_log.c src/ne_file.c src/ne_alloc.c src/ne_frame.c
@@ -101,38 +113,30 @@ test: $(APP_NAME)
 # User-facing target without extension.
 $(APP_NAME): $(OUTPUT)
 
-# Real file target used for correct incremental linking.
-# TMP override prevents MSVC linker temp-file failures under MSYS2/Cygwin make.
+# LDLIBS_PREFIX is set by platform makefiles (Windows: `-link`) to route LDLIBS
+# through the MSVC linker; empty everywhere else.
 $(OUTPUT): $(BUILD_DIR) $(OBJS)
 	@echo LINK $(OUTPUT)
-ifeq ($(IS_WINDOWS),1)
-ifneq ($(wildcard /bin/sh),)
-	@TMP="$(CURDIR)/build" TEMP="$(CURDIR)/build" $(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
-else
-	@$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
-endif
-else
-	@$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS)
-endif
+	$(Q)$(LD) $(OBJS) -o $(OUTPUT) $(LDFLAGS) $(LDLIBS_PREFIX) $(LDLIBS)
 
 $(BUILD_DIR):
-	@$(call mkdir_p,$(BUILD_DIR))
+	$(Q)$(call mkdir_p,$(BUILD_DIR))
 
 # Generate dependencies alongside objects using Clang's -MMD/-MP.
 DEPFLAGS := -MMD -MP
 
 $(BUILD_DIR)/%.$(OBJ_EXT): %.c $(EXTRA_OBJECT_DEPS)
 	@echo CC $<
-	@$(call mkdir_p,$(dir $@))
-	@$(CC) $(CFLAGS) -Iinclude $(DEPFLAGS) -MF $(@:.$(OBJ_EXT)=.d) -c $< -o $@
+	$(Q)$(call mkdir_p,$(dir $@))
+	$(Q)$(CC) $(CFLAGS) -Iinclude $(DEPFLAGS) -MF $(@:.$(OBJ_EXT)=.d) -c $< -o $@
 
 $(BUILD_DIR)/%.$(OBJ_EXT): %.m $(EXTRA_OBJECT_DEPS)
 	@echo OBJC $<
-	@$(call mkdir_p,$(dir $@))
-	@$(OBJC) $(CFLAGS) $(OBJCFLAGS) -Iinclude $(DEPFLAGS) -MF $(@:.$(OBJ_EXT)=.d) -c $< -o $@
+	$(Q)$(call mkdir_p,$(dir $@))
+	$(Q)$(OBJC) $(CFLAGS) $(OBJCFLAGS) -Iinclude $(DEPFLAGS) -MF $(@:.$(OBJ_EXT)=.d) -c $< -o $@
 
 clean:
-	@$(call rmdir_rf,build)
+	$(Q)$(call rmdir_rf,build)
 
 clean-full: clean
-	@$(call rmdir_rf,external)
+	$(Q)$(call rmdir_rf,external)
