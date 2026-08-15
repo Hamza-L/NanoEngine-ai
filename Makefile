@@ -57,7 +57,8 @@ LDFLAGS :=
 LDLIBS :=
 
 ifeq ($(ASAN),1)
-CFLAGS += -fsanitize=address -fno-omit-frame-pointer
+CFLAGS  += -fsanitize=address -fno-omit-frame-pointer
+LDFLAGS += -fsanitize=address
 endif
 
 # Platform-independent sources (platform makefiles append platform-specific ones).
