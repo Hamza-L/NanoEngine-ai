@@ -209,6 +209,7 @@ static NEPipelineHandle create_basic_pipeline(NERenderer *renderer) {
 /* ── Main ───────────────────────────────────────────────────────────────── */
 
 int main(void) {
+
     //----------------------------
     TEST_ALL_IF_TESTING_ENABLED();
     //----------------------------
@@ -216,13 +217,7 @@ int main(void) {
     ne_logger_set_level(ne_log_get_default_logger(), NE_LOG_LEVEL_TRACE);
 
     /* ── App + window ──────────────────────────────────────────────────── */
-
     NEApp *app = ne_app_create();
-    if (!app) {
-        NE_LOG_ERROR("failed to create app");
-        return 1;
-    }
-
     NEWindow *window = ne_window_create(app, &(NEWindowDesc){
                                                  .title = "NanoEngine2 — Triangle",
                                                  .x = 100,
@@ -232,62 +227,32 @@ int main(void) {
                                                  .resizable = true,
                                                  .transparent = true,
                                                  .undecorated = true});
-    if (!window) {
-        NE_LOG_ERROR("failed to create window");
-        ne_app_destroy(app);
-        return 1;
-    }
 
     const NEWindowCallbacks callbacks = {
         .on_key_down = on_key_down,
     };
+
     ne_window_set_callbacks(window, &callbacks, NULL);
 
     /* ── Renderer + surface ────────────────────────────────────────────── */
-    NERenderer *renderer = ne_renderer_create(app, &(NERendererDesc){.enable_validation = true});
-    if (!renderer) {
-        NE_LOG_ERROR("failed to create renderer");
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
-
+    NERenderer *renderer = ne_renderer_create( &(NERendererDesc){.enable_validation = true});
     NERenderSurface *surface = ne_renderer_create_surface(renderer, window,
                                                           &(NERenderSurfaceDesc){
                                                           .vsync = true,
                                                           .clear_color_rgba = {0.0f, 0.0f, 0.0f, 0.0f},
                                                           .present_backend = NE_PRESENT_BACKEND_DXGI});
-    if (!surface) {
-        NE_LOG_ERROR("failed to create render surface");
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
 
     NEPipelineHandle pipeline = NE_PIPELINE_HANDLE_NULL;
     NEBufferHandle vbo = NE_BUFFER_HANDLE_NULL;
 #ifndef __EMSCRIPTEN__
     pipeline = create_basic_pipeline(renderer);
-    if (!ne_pipeline_handle_valid(pipeline)) {
-        NE_LOG_ERROR("failed to create pipeline");
-        ne_renderer_destroy(renderer);
-        ne_window_destroy(window);
-        ne_app_destroy(app);
-        return 1;
-    }
-
     vbo = ne_buffer_create(renderer, &(NEBufferDesc){
         .size = sizeof(k_triangle_vertices),
         .usage = NE_BUFFER_USAGE_VERTEX,
         .initial_data = k_triangle_vertices,
         .dynamic = true, /* updated every frame to spin the triangle */
     });
-    if (!ne_buffer_handle_valid(vbo)) {
-        NE_LOG_ERROR("failed to create vertex buffer");
-    }
 #endif
-
     NE_LOG_INFO("triangle demo initialized — press Escape to quit");
 
     /* ── Frame context ─────────────────────────────────────────────────── */
@@ -318,24 +283,9 @@ int main(void) {
     };
 
     ne_set_window_render_dispatch(window, ne_render_frame, &frame_ctx);
-
-    /* ── Main loop ─────────────────────────────────────────────────────── */
-    /*
-     * The engine owns the frame loop. ne_app_run drives each window's render
-     * dispatch at the platform-correct cadence — a CADisplayLink on macOS
-     * (push), the pull loop on Win32, requestAnimationFrame on the web — so
-     * application code is identical on every platform.
-     *
-     * Note: on the web this does not return (the browser owns the loop); the
-     * cleanup below runs only on native.
-     */
     ne_app_run(app);
 
-    /* Avoid a dangling dispatch pointer into stack memory after the loop. */
-    ne_set_window_render_dispatch(window, NULL, NULL);
-
     /* ── Cleanup ───────────────────────────────────────────────────────── */
-
     ne_pipeline_destroy(renderer, frame_ctx.pipeline);
     ne_renderer_destroy(renderer);
     ne_window_destroy(window);

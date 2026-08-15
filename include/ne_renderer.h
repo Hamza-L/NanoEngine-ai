@@ -73,14 +73,13 @@ typedef struct NERenderSurfaceDesc {
  * - Attempting to create more than one renderer will fail.
  *
  * Parameters:
- * - `app`: Application instance returned by `ne_app_create`.
  * - `desc`: Renderer description (may be NULL for defaults).
  *
  * Returns:
  * - A valid `NERenderer*` on success.
  * - NULL on failure.
  */
-NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc);
+NERenderer *ne_renderer_create(const NERendererDesc *desc);
 
 /**
  * Destroy the renderer.

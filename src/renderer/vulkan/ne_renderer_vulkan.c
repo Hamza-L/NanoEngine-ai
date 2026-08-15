@@ -488,28 +488,30 @@ static bool ne_vk_surface_ensure_swapchain(NERenderSurface *surface) {
     return true;
 }
 
-NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
-    (void)app;
+NERenderer *ne_renderer_create(const NERendererDesc *desc) {
+    NERenderer *r = NULL;
+    VkExtensionProperties *avail_exts = NULL;
+    VkLayerProperties *avail_layers = NULL;
 
     if (g_renderer_singleton) {
-        NE_LOG_ERROR("renderer already created (only one renderer is supported)");
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create: renderer already created (only one renderer is supported)");
+        goto err_return;
     }
 
-    NERenderer *r = (NERenderer *)calloc(1, sizeof(NERenderer));
+    r = (NERenderer *)calloc(1, sizeof(NERenderer));
     if (!r) {
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create: alloc failed");
+        goto err_return;
     }
 
     if (!ne_vk_load_loader(&r->vulkan_lib)) {
-        ne_renderer_destroy(r);
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create: loading vulkan library failed");
+        goto err_return;
     }
 
     /* Enumerate extensions and layers once, then check against the cached lists. */
     uint32_t avail_ext_count = 0;
     vkEnumerateInstanceExtensionProperties(NULL, &avail_ext_count, NULL);
-    VkExtensionProperties *avail_exts = NULL;
     if (avail_ext_count > 0) {
         avail_exts = (VkExtensionProperties *)calloc(avail_ext_count, sizeof(VkExtensionProperties));
         if (avail_exts) {
@@ -519,7 +521,6 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
 
     uint32_t avail_layer_count = 0;
     vkEnumerateInstanceLayerProperties(&avail_layer_count, NULL);
-    VkLayerProperties *avail_layers = NULL;
     if (avail_layer_count > 0) {
         avail_layers = (VkLayerProperties *)calloc(avail_layer_count, sizeof(VkLayerProperties));
         if (avail_layers) {
@@ -541,11 +542,8 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
             }
         }
         if (!found) {
-            NE_LOG_ERROR("required Vulkan instance extension not available: %s", required_exts[i]);
-            free(avail_exts);
-            free(avail_layers);
-            ne_renderer_destroy(r);
-            return NULL;
+            NE_LOG_ERROR("ne_renderer_create: required Vulkan instance extension not available: %s", required_exts[i]);
+            goto err_return;
         }
         extensions[ext_count++] = required_exts[i];
     }
@@ -578,9 +576,6 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
         }
     }
 
-    free(avail_exts);
-    free(avail_layers);
-
     VkApplicationInfo app_info;
     memset(&app_info, 0, sizeof(app_info));
     app_info.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -601,18 +596,22 @@ NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
 
     VkResult vr = vkCreateInstance(&ici, NULL, &r->instance);
     if (vr != VK_SUCCESS || r->instance == VK_NULL_HANDLE) {
-        NE_LOG_ERROR("vkCreateInstance failed: %d", (int)vr);
-        ne_renderer_destroy(r);
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create: vkCreateInstance failed: %d", (int)vr);
+        goto err_return;
     }
 
     if (!ne_vk_load_instance_fns(r->instance)) {
-        NE_LOG_ERROR("failed to load Vulkan instance functions");
-        ne_renderer_destroy(r);
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create: failed to load vulkan functions ");
+        goto err_return;
     }
 
     g_renderer_singleton = r;
+    return r;
+
+ err_return:
+    if(avail_exts) free(avail_exts);
+    if(avail_layers) free(avail_layers);
+    ne_renderer_destroy(r);
     return r;
 }
 
@@ -723,27 +722,33 @@ void ne_renderer_destroy(NERenderer *r) {
     }
 
     free(r);
+    r = NULL;
 }
 
 NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, const NERenderSurfaceDesc *desc) {
+    NERenderSurface *surface = NULL;
+    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
     if (!r || !window) {
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create_surface: bad param");
+        goto err_return;
     }
 
     if (!ne_window_is_open(window)) {
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create_surface: window closed");
+        goto err_return;
     }
 
     for (NERenderSurface *it = r->surfaces; it; it = it->next) {
         if (it->window == window) {
-            NE_LOG_ERROR("window already has a render surface");
-            return NULL;
+            NE_LOG_INFO("ne_renderer_create_surface: window already has a surface");
+            return it;
         }
     }
 
     HWND hwnd = (HWND)ne_window_get_native_handle(window, NE_NATIVE_HANDLE_WIN32_HWND);
     if (!hwnd) {
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create_surface: cannot retrieve window hwnd");
+        goto err_return;
     }
 
     VkWin32SurfaceCreateInfoKHR sci;
@@ -752,27 +757,30 @@ NERenderSurface *ne_renderer_create_surface(NERenderer *r, NEWindow *window, con
     sci.hinstance = GetModuleHandleW(NULL);
     sci.hwnd = hwnd;
 
-    VkSurfaceKHR vk_surface = VK_NULL_HANDLE;
     const VkResult vr = vkCreateWin32SurfaceKHR(r->instance, &sci, NULL, &vk_surface);
     if (vr != VK_SUCCESS || vk_surface == VK_NULL_HANDLE) {
-        NE_LOG_ERROR("vkCreateWin32SurfaceKHR failed: %d", (int)vr);
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create_surface: failed to create surface: %d", (int)vr);
+        goto err_return;
     }
 
-    NERenderSurface *surface = (NERenderSurface *)calloc(1, sizeof(NERenderSurface));
+    surface = (NERenderSurface *)calloc(1, sizeof(NERenderSurface));
     if (!surface) {
-        vkDestroySurfaceKHR(r->instance, vk_surface, NULL);
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create_surface: alloc failed: %d", (int)vr);
+        goto err_return;
     }
 
     if (!ne_vk_surface_init(surface, r, window, vk_surface, desc)) {
-        ne_renderer_destroy_surface(r, surface);
-        return NULL;
+        NE_LOG_ERROR("ne_renderer_create_surface: failed to create surface: %d", (int)vr);
+        goto err_return;
     }
 
     surface->next = r->surfaces;
     r->surfaces = surface;
+    return surface;
 
+ err_return:
+    if(vk_surface) vkDestroySurfaceKHR(r->instance, vk_surface, NULL);
+    if(surface) ne_renderer_destroy_surface(r, surface);
     return surface;
 }
 
@@ -831,6 +839,7 @@ void ne_renderer_destroy_surface(NERenderer *r, NERenderSurface *surface) {
     surface->next = NULL;
 
     free(surface);
+    surface = NULL;
 }
 
 void ne_renderer_surface_set_clear_color(NERenderSurface *surface, float r, float g, float b, float a) {

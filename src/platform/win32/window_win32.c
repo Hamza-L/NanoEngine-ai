@@ -466,14 +466,16 @@ static bool ne_register_window_class(NEApp *app) {
 }
 
 NEApp *ne_app_create(void) {
+    NEApp *app = NULL;
     if (g_app_state.app) {
         g_app_state.refcount++;
         return g_app_state.app;
     }
 
-    NEApp *app = (NEApp *)calloc(1, sizeof(NEApp));
+    app = (NEApp *)calloc(1, sizeof(NEApp));
     if (!app) {
-        return NULL;
+        NE_LOG_ERROR("ne_app_create: Failed to alloc memory");
+        goto err_return;
     }
 
     app->hinstance = GetModuleHandleW(NULL);
@@ -482,12 +484,16 @@ NEApp *ne_app_create(void) {
     app->window_count = 0;
 
     if (!ne_register_window_class(app)) {
-        free(app);
-        return NULL;
+        NE_LOG_ERROR("ne_app_create: Failed to register window class");
+        goto err_return;
     }
 
     g_app_state.app = app;
     g_app_state.refcount = 1;
+    return app;
+
+    err_return:
+    if(app) free(app);
     return app;
 }
 
@@ -578,17 +584,16 @@ uint32_t ne_app_get_window_count(const NEApp *app) {
 }
 
 NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
+    NEWindow *window = NULL;
     if (!app || !app->initialized || !app->running || !desc || desc->width <= 0 || desc->height <= 0) {
-        return NULL;
+        NE_LOG_ERROR("ne_window_create: bad param");
+        goto err_return;
     }
 
-    if (!ne_register_window_class(app)) {
-        return NULL;
-    }
-
-    NEWindow *window = (NEWindow *)calloc(1, sizeof(NEWindow));
+    window = (NEWindow *)calloc(1, sizeof(NEWindow));
     if (!window) {
-        return NULL;
+        NE_LOG_ERROR("ne_window_create: Failed to alloc memory");
+        goto err_return;
     }
 
     window->app = app;
@@ -622,10 +627,8 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     if (title_w) {free(title_w);}
 
     if (!hwnd) {
-        const DWORD err = GetLastError();
-        NE_LOG_ERROR("CreateWindowExW failed (err=%lu)", (unsigned long)err);
-        free(window);
-        return NULL;
+        NE_LOG_ERROR("CreateWindowExW failed (err=%lu)", (unsigned long)GetLastError());
+        goto err_return;
     } else {
         BOOL USE_DARK_MODE = true;
         DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE,
@@ -643,6 +646,10 @@ NEWindow *ne_window_create(NEApp *app, const NEWindowDesc *desc) {
     window->next = app->windows;
     app->windows = window;
     app->window_count++;
+    return window;
+
+    err_return:
+    if(window) free(window);
     return window;
 }
 

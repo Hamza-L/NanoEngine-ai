@@ -203,6 +203,7 @@ bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size) {
 
 NEBufferHandle ne_buffer_create(NERenderer *renderer, const NEBufferDesc *desc) {
     if (!renderer || !desc || desc->size == 0) {
+        NE_LOG_ERROR("ne_buffer_create: bad param");
         return NE_BUFFER_HANDLE_NULL;
     }
 
