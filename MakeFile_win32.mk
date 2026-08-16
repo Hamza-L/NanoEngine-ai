@@ -26,14 +26,14 @@ $(call require_tool,clang-cl,clang version,Ships with LLVM/Clang. Ensure the LLV
 $(call require_tool,cmake,cmake version,Install CMake from https://cmake.org/download/ (or `winget install Kitware.CMake`) and add it to PATH.)
 $(call require_tool,tar,tar,tar ships with Windows 10 build 17063+. Update Windows or install via Git for Windows.)
 $(call require_probe,tool 'powershell',powershell -NoProfile -Command "echo ok",ok,PowerShell ships with Windows$(comma) so this usually means the PowerShell exe is not on PATH. Repair your Windows install or install PowerShell 7 from https://aka.ms/powershell.)
-# clang-cl auto-detects Visual Studio via vswhere at a fixed path (stable
-# since VS 2017); this check catches "VS not installed" and "C++ workload
-# not selected" without requiring vcvars to have been run. link.exe on PATH
-# is not a reliable signal — MSYS2/Cygwin ship an unrelated link.exe that
-# would false-positive, and a working clang-cl auto-detect does not put
-# MSVC's link.exe on PATH at all.
+# Detect any Visual Studio install via vswhere (fixed path since VS 2017).
+# Component-level checks (e.g. -requires) are fragile across VS SKUs and
+# installer versions, and the -products '*' idiom needs different quoting
+# under bash/cmd/PowerShell; so we do the minimum here — "is any VS
+# installed?" — and let clang-cl surface a missing C++ workload with its
+# own error at build time.
 VSWHERE := C:/Program Files (x86)/Microsoft Visual Studio/Installer/vswhere.exe
-$(call require_probe,Visual Studio 2022 with C++ tools,"$(VSWHERE)" -latest -products '*' -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath,Microsoft Visual Studio,Install Visual Studio 2022 (any edition) or "Build Tools for Visual Studio 2022"$(comma) and select the "Desktop development with C++" workload during install.)
+$(call require_probe,Visual Studio 2022,"$(VSWHERE)" -latest -property installationPath,Microsoft Visual Studio,Install Visual Studio 2022 (any edition) or "Build Tools for Visual Studio 2022"$(comma) and select the "Desktop development with C++" workload.)
 
 # --- Sources --------------------------------------------------------------
 SRC_C += src/platform/win32/window_win32.c
