@@ -1,0 +1,366 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>Vulkan backend — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">Vulkan backend</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / Backends / Vulkan</div>
+    <div><span class="pill win">Windows</span> <span class="pill vulkan">Vulkan 1.3</span></div>
+    <h1>Vulkan backend</h1>
+    <p class="lede">The biggest, oldest, most feature-complete backend. About 3,700 lines split across seven files. Runs on Windows only.</p>
+
+    <h2>File layout</h2>
+
+<pre class="ascii">
+src/renderer/vulkan/
+├── <span class="hi">ne_renderer_vulkan.c</span>          Public entry + frame loop      (1274 LOC)
+├── ne_swapchain.h                  Swapchain vtable
+├── ne_swapchain_vulkan_wsi.c       Standard WSI implementation    ( 440 LOC)
+├── ne_swapchain_dxgi.c             DXGI + DirectComposition path  ( 777 LOC)
+└── <span class="hi">internal/</span>                       Backend internals, split by concern
+    ├── ne_vulkan_globals.h         NE_VK_MAX_FRAMES_IN_FLIGHT = 2
+    ├── ne_vulkan_loader.h          Function-pointer table + loader
+    ├── <span class="hi2">ne_vulkan_renderer.{c,h}</span>    struct NERenderer + shared helpers
+    ├── <span class="hi2">ne_vulkan_buffers.{c,h}</span>     Buffers (static, dynamic) + image slots
+    ├── <span class="hi2">ne_vulkan_images.{c,h}</span>      Image creation (uses buffers pool)
+    ├── <span class="hi2">ne_vulkan_pipelines.{c,h}</span>   Deferred pipeline compilation
+    └── <span class="hi2">ne_vulkan_shaders.{c,h}</span>     SPIR-V + glslang runtime path
+</pre>
+
+    <h2>Dynamic loading — no link-time Vulkan</h2>
+
+    <p>Traditional Vulkan apps link against <code>vulkan-1.lib</code> at build time. The engine takes a different approach: it declares <code>VK_NO_PROTOTYPES</code> and loads every function pointer at runtime.</p>
+
+<pre><code class="language-c">// src/renderer/vulkan/internal/ne_vulkan_loader.h — ~70 function pointers
+extern PFN_vkCreateInstance vkCreateInstance;
+extern PFN_vkCreateDevice   vkCreateDevice;
+extern PFN_vkAllocateMemory vkAllocateMemory;
+// ... 60+ more ...
+
+// Boot sequence
+HMODULE lib = LoadLibraryA("vulkan-1.dll");
+PFN_vkGetInstanceProcAddr vkGetInstanceProcAddr = GetProcAddress(lib, "vkGetInstanceProcAddr");
+ne_vk_load_loader();              // resolves the "global" functions
+ne_vk_load_instance_fns(instance); // resolves the "instance" functions
+ne_vk_load_device_fns(device);     // resolves the "device" functions</code></pre>
+
+    <div class="plain">
+      Why bother? Two reasons: (1) the app runs even on machines without the Vulkan SDK installed — you don't need the import library at build time. (2) It lets the engine query the loader for extension-specific functions cleanly.
+    </div>
+
+    <h2>The renderer struct</h2>
+
+<pre><code class="language-c">// src/renderer/vulkan/internal/ne_vulkan_renderer.h
+struct NERenderer {
+    HMODULE  vulkan_lib;
+
+    VkInstance       instance;
+    VkPhysicalDevice phys;
+    VkPhysicalDeviceMemoryProperties mem_props;
+    VkDevice         device;
+    VkQueue          queue;
+    uint32_t         queue_family_index;
+
+    // Three resource pools
+    NEPool buffers;      // NEVulkanBufferSlot (also stores images via union)
+    NEPool shaders;      // NEVulkanShaderSlot
+    NEPool pipelines;    // NEVulkanPipelineSlot
+
+    // Shared staging buffer for static-buffer uploads
+    VkBuffer        staging_buffer;
+    VkDeviceMemory  staging_memory;
+    void           *staging_mapped;
+
+    // Command buffer dedicated to transfers
+    VkCommandPool   transfer_cmd_pool;
+    VkCommandBuffer transfer_cmd;
+    VkFence         transfer_fence;
+
+    NEShaderOptimization shader_optimization;
+
+    struct NERenderSurface *surfaces;   // intrusive linked list
+};</code></pre>
+
+    <h2>The surface struct</h2>
+
+<pre><code class="language-c">// src/renderer/vulkan/ne_renderer_vulkan.c
+struct NERenderSurface {
+    NERenderer *renderer;
+    NEWindow   *window;
+
+    VkSurfaceKHR   surface;
+    NESwapchain   *swapchain;          // vtable-driven — WSI or DXGI
+    VkRenderPass   render_pass;
+
+    VkCommandPool   cmd_pool;
+    VkCommandBuffer cmds[2];               // one per flight frame
+    VkSemaphore     sem_image_available[2];
+    VkFence         fences_in_flight[2];
+    uint32_t        frame_index;           // wraps 0, 1
+
+    bool  vsync;
+    float clear_color[4];
+
+    NERenderPass pass;                     // embedded, returned by begin_frame
+    NEPresentBackend present_backend;
+};</code></pre>
+
+    <div class="callout info">
+      <div class="callout-title">💡 The pass is embedded, not heap-allocated</div>
+      <p><code>NERenderPass</code> is a small token holding the current command buffer + pipeline layout + render pass. Because it lives <em>inside</em> the surface struct, <code>begin_frame</code> can just return its address — no allocation per frame.</p>
+    </div>
+
+    <h2>Boot sequence — <code>ne_renderer_create</code></h2>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 460" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vulkan boot sequence">
+        <defs>
+          <marker id="ah-vk" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#f87171"/>
+          </marker>
+        </defs>
+
+        <rect x="60" y="20" width="600" height="45" rx="6" class="node-box" stroke="#f87171"/>
+        <text x="360" y="47" text-anchor="middle" class="node-text">1. LoadLibraryA("vulkan-1.dll") — get vkGetInstanceProcAddr</text>
+
+        <line x1="360" y1="65" x2="360" y2="85" stroke="#f87171" stroke-width="2" marker-end="url(#ah-vk)"/>
+
+        <rect x="60" y="85" width="600" height="45" rx="6" class="node-box" stroke="#f87171"/>
+        <text x="360" y="112" text-anchor="middle" class="node-text">2. vkCreateInstance — enable validation layer if requested</text>
+
+        <line x1="360" y1="130" x2="360" y2="150" stroke="#f87171" stroke-width="2" marker-end="url(#ah-vk)"/>
+
+        <rect x="60" y="150" width="600" height="45" rx="6" class="node-box" stroke="#f87171"/>
+        <text x="360" y="177" text-anchor="middle" class="node-text">3. Enumerate physical devices — pick the first suitable one</text>
+
+        <line x1="360" y1="195" x2="360" y2="215" stroke="#f87171" stroke-width="2" marker-end="url(#ah-vk)"/>
+
+        <rect x="60" y="215" width="600" height="45" rx="6" class="node-box" stroke="#f87171"/>
+        <text x="360" y="242" text-anchor="middle" class="node-text">4. Find a queue family that supports GRAPHICS + present</text>
+
+        <line x1="360" y1="260" x2="360" y2="280" stroke="#f87171" stroke-width="2" marker-end="url(#ah-vk)"/>
+
+        <rect x="60" y="280" width="600" height="45" rx="6" class="node-box" stroke="#f87171"/>
+        <text x="360" y="307" text-anchor="middle" class="node-text">5. vkCreateDevice — enable VK_KHR_swapchain, external_memory_win32</text>
+
+        <line x1="360" y1="325" x2="360" y2="345" stroke="#f87171" stroke-width="2" marker-end="url(#ah-vk)"/>
+
+        <rect x="60" y="345" width="600" height="45" rx="6" class="node-box" stroke="#f87171"/>
+        <text x="360" y="372" text-anchor="middle" class="node-text">6. Create staging buffer + transfer command pool</text>
+
+        <line x1="360" y1="390" x2="360" y2="410" stroke="#f87171" stroke-width="2" marker-end="url(#ah-vk)"/>
+
+        <rect x="60" y="410" width="600" height="45" rx="6" class="node-box good"/>
+        <text x="360" y="437" text-anchor="middle" class="node-text">Ready. Return the singleton NERenderer*.</text>
+      </svg>
+      <div class="diagram-caption">All synchronous — <code>ne_renderer_create</code> returns a fully-usable renderer.</div>
+    </div>
+
+    <h2>The frame loop</h2>
+
+    <p>This is the meat of the Vulkan backend. About 200 lines total, but every line matters.</p>
+
+<pre><code class="language-c">NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *s) {
+    uint32_t frame = s-&gt;frame_index % 2;
+
+    // 1. Wait for the GPU to finish frame N-2 (the one that used cmds[frame])
+    vkWaitForFences(r-&gt;device, 1, &amp;s-&gt;fences_in_flight[frame], VK_TRUE, UINT64_MAX);
+
+    // 2. Rebuild swapchain if the window resized (or first frame)
+    if (s-&gt;swapchain-&gt;needs_recreate) {
+        s-&gt;swapchain-&gt;ops-&gt;recreate(s-&gt;swapchain, s-&gt;vsync);
+    }
+
+    // 3. Ask the swapchain for the next image
+    if (!s-&gt;swapchain-&gt;ops-&gt;acquire(s-&gt;swapchain, s-&gt;sem_image_available[frame])) {
+        return NULL;   // window minimized / swapchain out of date — skip
+    }
+
+    // 4. WSI needs per-image fence tracking to avoid re-using an image the GPU still owns
+    /* (skipped for DXGI, which uses fence-based sync internally) */
+
+    // 5. Reset fence + command buffer, then record
+    vkResetFences        (r-&gt;device, 1, &amp;s-&gt;fences_in_flight[frame]);
+    vkResetCommandBuffer (s-&gt;cmds[frame], 0);
+    vkBeginCommandBuffer (s-&gt;cmds[frame], &amp;begin_info);
+
+    // 6. Begin the render pass — LOAD_OP_CLEAR wipes the screen to clear_color
+    vkCmdBeginRenderPass(s-&gt;cmds[frame], &amp;rpi, VK_SUBPASS_CONTENTS_INLINE);
+
+    // 7. Set the viewport with Y flipped (matches OpenGL vertex convention)
+    VkViewport vp = {
+        .x = 0, .y = (float)s-&gt;swapchain-&gt;extent.height,
+        .width  =  (float)s-&gt;swapchain-&gt;extent.width,
+        .height = -(float)s-&gt;swapchain-&gt;extent.height,
+    };
+    vkCmdSetViewport(s-&gt;cmds[frame], 0, 1, &amp;vp);
+
+    // 8. Fill in the pass token and hand it back
+    s-&gt;pass.cmd = s-&gt;cmds[frame];
+    return &amp;s-&gt;pass;
+}</code></pre>
+
+    <p>And the end:</p>
+
+<pre><code class="language-c">void ne_renderer_end_frame(NERenderer *r, NERenderSurface *s) {
+    uint32_t frame = s-&gt;frame_index % 2;
+
+    vkCmdEndRenderPass  (s-&gt;cmds[frame]);
+    vkEndCommandBuffer  (s-&gt;cmds[frame]);
+
+    // Submit — the GPU waits for image_available, signals render_finished
+    VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+    VkSubmitInfo si = {
+        .waitSemaphoreCount   = 1, .pWaitSemaphores   = &amp;s-&gt;sem_image_available[frame],
+        .pWaitDstStageMask    = &amp;wait_stage,
+        .commandBufferCount   = 1, .pCommandBuffers   = &amp;s-&gt;cmds[frame],
+        .signalSemaphoreCount = 1, .pSignalSemaphores = &amp;render_finished,
+    };
+    vkQueueSubmit(r-&gt;queue, 1, &amp;si, s-&gt;fences_in_flight[frame]);
+
+    // Present — the OS composites the new image on the next vsync
+    s-&gt;swapchain-&gt;ops-&gt;present(s-&gt;swapchain, r-&gt;queue, render_finished);
+
+    s-&gt;frame_index = (s-&gt;frame_index + 1) % 2;
+}</code></pre>
+
+    <div class="callout info">
+      <div class="callout-title">💡 The Y-flip trick</div>
+      <p>OpenGL uses Y-up, Vulkan uses Y-down. Rather than change every vertex shader, the engine flips the viewport: <code>y = height</code>, <code>height = -height</code>. This is a Vulkan 1.1+ feature (<code>VK_KHR_maintenance1</code>, now core) and it lets you write "Vulkan OR OpenGL" shaders that Just Work.</p>
+    </div>
+
+    <h2>Sync primitives at a glance</h2>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Vulkan sync objects">
+        <!-- Timeline lanes -->
+        <text x="30" y="30" fill="#22d3ee" font-weight="700">CPU</text>
+        <text x="30" y="180" fill="#f472b6" font-weight="700">GPU</text>
+
+        <!-- Frame markers -->
+        <line x1="80" y1="40" x2="680" y2="40" stroke="#3a3f4b" stroke-dasharray="4 4"/>
+        <line x1="80" y1="190" x2="680" y2="190" stroke="#3a3f4b" stroke-dasharray="4 4"/>
+
+        <!-- CPU activity -->
+        <rect x="90"  y="50" width="120" height="30" rx="4" fill="#22d3ee" opacity="0.5"/>
+        <text x="150" y="70" text-anchor="middle" fill="white" font-size="11" font-weight="600">Record frame N</text>
+
+        <rect x="220" y="50" width="60" height="30" rx="4" fill="#f59e0b" opacity="0.5"/>
+        <text x="250" y="70" text-anchor="middle" fill="white" font-size="10">wait fence</text>
+
+        <rect x="290" y="50" width="120" height="30" rx="4" fill="#22d3ee" opacity="0.5"/>
+        <text x="350" y="70" text-anchor="middle" fill="white" font-size="11" font-weight="600">Record N+1</text>
+
+        <rect x="420" y="50" width="60" height="30" rx="4" fill="#f59e0b" opacity="0.5"/>
+        <text x="450" y="70" text-anchor="middle" fill="white" font-size="10">wait fence</text>
+
+        <rect x="490" y="50" width="120" height="30" rx="4" fill="#22d3ee" opacity="0.5"/>
+        <text x="550" y="70" text-anchor="middle" fill="white" font-size="11" font-weight="600">Record N+2</text>
+
+        <!-- GPU activity -->
+        <rect x="210" y="200" width="150" height="30" rx="4" fill="#f472b6" opacity="0.5"/>
+        <text x="285" y="220" text-anchor="middle" fill="white" font-size="11" font-weight="600">Draw N</text>
+
+        <rect x="410" y="200" width="150" height="30" rx="4" fill="#f472b6" opacity="0.5"/>
+        <text x="485" y="220" text-anchor="middle" fill="white" font-size="11" font-weight="600">Draw N+1</text>
+
+        <rect x="610" y="200" width="70" height="30" rx="4" fill="#f472b6" opacity="0.5"/>
+        <text x="645" y="220" text-anchor="middle" fill="white" font-size="10">N+2…</text>
+
+        <!-- Fence signal arrow -->
+        <path d="M360 232 Q360 250 380 250 Q470 250 470 82" stroke="#f59e0b" stroke-width="2" fill="none" stroke-dasharray="3 3"/>
+        <text x="415" y="270" fill="#f59e0b" font-size="11">fence signal → unblocks CPU</text>
+
+        <!-- Legend -->
+        <rect x="80" y="290" width="16" height="14" fill="#22d3ee" opacity="0.5"/>
+        <text x="102" y="302" fill="#8891a3" font-size="11">CPU recording</text>
+        <rect x="200" y="290" width="16" height="14" fill="#f59e0b" opacity="0.5"/>
+        <text x="222" y="302" fill="#8891a3" font-size="11">CPU blocked on fence</text>
+        <rect x="360" y="290" width="16" height="14" fill="#f472b6" opacity="0.5"/>
+        <text x="382" y="302" fill="#8891a3" font-size="11">GPU executing</text>
+      </svg>
+      <div class="diagram-caption">The CPU stays exactly one frame ahead. The fence throttles it whenever the GPU falls behind.</div>
+    </div>
+
+    <h2>Notable quirks</h2>
+
+    <ul>
+      <li><strong>The singleton is enforced.</strong> A second <code>ne_renderer_create</code> call returns null — checked via a global <code>g_renderer_singleton</code>.</li>
+      <li><strong>Images share the buffers pool.</strong> <code>NEVulkanBufferSlot</code> has a union: it's either a buffer allocation or an image allocation. Saves code duplication but is a bit of an oddity.</li>
+      <li><strong>No GPU memory allocator.</strong> Every buffer/image calls <code>vkAllocateMemory</code> directly. Fine for the demo; won't scale to real scenes.</li>
+      <li><strong>The DXGI swapchain skips the semaphore chain.</strong> It waits with a plain fence and <code>vkDeviceWaitIdle</code>. Works but stalls the GPU.</li>
+      <li><strong>Compute pipelines are stubs</strong> — <code>ne_compute_pipeline_create</code> allocates a slot but never compiles. <code>ne_render_pass_begin_compute</code> logs a warning and returns null.</li>
+      <li><strong>glslang linked as static libs.</strong> The Win32 build fetches glslang 16.5.0 as a release zip and links five .lib files. Big binary; fast startup.</li>
+    </ul>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <ul>
+        <li><strong>Add a GPU memory allocator.</strong> Either integrate <a href="https://gpuopen.com/vulkan-memory-allocator/" target="_blank" rel="noopener">VMA</a> or roll a simple slab allocator. Would unlock any real workload.</li>
+        <li><strong>Support Vulkan on Linux and macOS (via MoltenVK).</strong> The backend already isolates platform code to <code>vkCreateWin32SurfaceKHR</code> — swapping that for <code>vkCreateXcbSurfaceKHR</code> / <code>vkCreateMetalSurfaceEXT</code> is a small change.</li>
+        <li><strong>Pipeline cache.</strong> <code>VkPipelineCache</code> persisted to disk would cut startup time on subsequent runs.</li>
+        <li><strong>Dedicated transfer queue.</strong> The engine uses one queue for everything. A separate transfer queue would let uploads overlap with drawing.</li>
+        <li><strong>Descriptor sets.</strong> Nothing besides push constants exists for uniform data. Real scenes need bind groups.</li>
+        <li><strong>Compute path.</strong> The scaffolding is there — just needs the fill-in.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="swapchain.html"><small>Previous</small>← The swapchain</a>
+      <a class="next" href="backend-metal.html"><small>Next</small>Metal backend →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>Metal backend — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">Metal backend</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / Backends / Metal</div>
+    <div><span class="pill mac">macOS</span> <span class="pill metal">Metal 3</span></div>
+    <h1>Metal backend</h1>
+    <p class="lede">1180 lines of Objective-C in one file. Simpler than the Vulkan backend because Metal makes a lot of decisions for you.</p>
+
+    <h2>Why Metal is simpler than Vulkan</h2>
+
+    <p>The whole backend fits in <code>src/renderer/metal/ne_renderer_metal.m</code> — one file. Compare to Vulkan's seven. This isn't laziness; Metal genuinely does more for you:</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <h3>No function loader</h3>
+        <p>Metal is part of macOS. You link the framework and every function is there.</p>
+      </div>
+      <div class="card">
+        <h3>No queue families</h3>
+        <p>One <code>MTLCommandQueue</code> for everything. No enumeration, no picking.</p>
+      </div>
+      <div class="card">
+        <h3>Unified memory on Apple Silicon</h3>
+        <p>CPU and GPU share the same memory. No staging buffer, no copy commands.</p>
+      </div>
+      <div class="card">
+        <h3>Auto-tracked resources</h3>
+        <p>Metal tracks which resources a command buffer references and keeps them alive automatically.</p>
+      </div>
+    </div>
+
+    <h2>The renderer struct</h2>
+
+<pre><code class="language-objectivec">// src/renderer/metal/ne_renderer_metal.m
+struct NERenderer {
+    void *device;    // id&lt;MTLDevice&gt;        (ARC-retained via CFBridgingRetain)
+    void *queue;     // id&lt;MTLCommandQueue&gt;
+
+    NEShaderSlot   *shaders;    uint32_t shader_count;   uint32_t shader_cap;
+    NEBufferSlot   *buffers;    uint32_t buffer_count;   uint32_t buffer_cap;
+    NEPipelineSlot *pipelines;  uint32_t pipeline_count; uint32_t pipeline_cap;
+
+    NEShaderOptimization shader_optimization;
+};</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">🐛 The pools don't use <code>NEPool</code></div>
+      <p>Unlike Vulkan and WebGPU, this backend uses a hand-rolled pool (<code>T*</code> + <code>count</code> + <code>cap</code>) instead of the shared <code>NEPool</code> from <code>ne_alloc.h</code>. The allocator still scans linearly for a free slot; the API just isn't unified. Something to clean up.</p>
+    </div>
+
+    <h2>The surface struct</h2>
+
+<pre><code class="language-objectivec">struct NERenderSurface {
+    NERenderer *renderer;
+    NEWindow   *window;
+
+    void *layer;             // CAMetalLayer*  — the actual swapchain
+    void *drawable;          // id&lt;CAMetalDrawable&gt;  — this frame's image
+    void *command_buffer;    // id&lt;MTLCommandBuffer&gt;
+    void *encoder;           // id&lt;MTLRenderCommandEncoder&gt;  — open during frame
+
+    float clear_color[4];
+
+    dispatch_semaphore_t frame_semaphore;    // CPU/GPU pacing (init = 2)
+    uint32_t frame_index;                    // ring 0..1
+
+    NERenderPass pass;                       // embedded, per-surface
+
+    // Per-frame pass state
+    uint32_t         current_topology;
+    NEBufferHandle   current_index_buffer;
+    uint32_t         current_index_type;
+};</code></pre>
+
+    <div class="callout info">
+      <div class="callout-title">💡 Each surface has its own <code>NERenderPass</code></div>
+      <p>Unlike the WebGPU backend (which has a single global pass), each Metal surface embeds its own pass token. That means N surfaces can render on independent timelines — one window can draw while another finishes its previous frame.</p>
+    </div>
+
+    <h2>Boot sequence</h2>
+
+    <p>All of five steps. Compare to Vulkan's ten.</p>
+
+<pre><code class="language-c">NERenderer *ne_renderer_create(const NERendererDesc *desc) {
+    // 1. Get the system's default GPU
+    id&lt;MTLDevice&gt; device = MTLCreateSystemDefaultDevice();
+    if (!device) return NULL;
+
+    // 2. Create the one and only command queue
+    id&lt;MTLCommandQueue&gt; queue = [device newCommandQueue];
+
+    // 3. Allocate the renderer struct
+    NERenderer *r = calloc(1, sizeof(NERenderer));
+
+    // 4. Hand ownership of the ObjC objects into the struct's void* fields
+    r-&gt;device = (__bridge_retained void *)device;
+    r-&gt;queue  = (__bridge_retained void *)queue;
+
+    // 5. Done. (Note: enable_validation is ignored — see below.)
+    return r;
+}</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ <code>enable_validation</code> is silently ignored</div>
+      <p>Metal's GPU validation isn't a runtime device flag — it's an environment variable (<code>MTL_DEBUG_LAYER=1</code>) or an Xcode scheme setting. The engine documents this in a comment but the field is a no-op on this backend.</p>
+    </div>
+
+    <h2>Frame loop</h2>
+
+    <p>Metal frames are shorter and less ceremonious than Vulkan frames. The command encoder does the heavy lifting.</p>
+
+<pre><code class="language-objectivec">NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *s) {
+    // Guard: refuse if already in a frame (per-surface, not global)
+    if (s-&gt;drawable || s-&gt;command_buffer) return NULL;
+
+    // 1. Block if 2 frames are already in flight
+    dispatch_semaphore_wait(s-&gt;frame_semaphore, DISPATCH_TIME_FOREVER);
+
+    // 2. Resize handling — cheap, done every frame
+    int32_t fb_w, fb_h;
+    ne_window_get_framebuffer_size(s-&gt;window, &amp;fb_w, &amp;fb_h);
+    CAMetalLayer *layer = (__bridge CAMetalLayer *)s-&gt;layer;
+    layer.drawableSize = CGSizeMake(fb_w, fb_h);
+
+    // 3. Get the next drawable image
+    id&lt;CAMetalDrawable&gt; drawable = [layer nextDrawable];
+    if (!drawable) {
+        // May happen during resize or when window is occluded
+        dispatch_semaphore_signal(s-&gt;frame_semaphore);
+        return NULL;
+    }
+
+    // 4. Make a command buffer for this frame
+    id&lt;MTLCommandQueue&gt; queue = (__bridge id&lt;MTLCommandQueue&gt;)r-&gt;queue;
+    id&lt;MTLCommandBuffer&gt; cmd = [queue commandBuffer];
+
+    // 5. Set up the render pass descriptor
+    MTLRenderPassDescriptor *rpd = [MTLRenderPassDescriptor renderPassDescriptor];
+    rpd.colorAttachments[0].texture     = drawable.texture;
+    rpd.colorAttachments[0].loadAction  = MTLLoadActionClear;
+    rpd.colorAttachments[0].storeAction = MTLStoreActionStore;
+    rpd.colorAttachments[0].clearColor  = MTLClearColorMake(s-&gt;clear_color[0], ...);
+
+    // 6. Open a render command encoder — this stays open until end_frame
+    id&lt;MTLRenderCommandEncoder&gt; enc = [cmd renderCommandEncoderWithDescriptor:rpd];
+
+    // 7. Full-viewport by default
+    [enc setViewport:(MTLViewport){0, 0, fb_w, fb_h, 0, 1}];
+    [enc setScissorRect:(MTLScissorRect){0, 0, fb_w, fb_h}];
+
+    // 8. Store into the surface + return the pass token
+    s-&gt;drawable       = (__bridge_retained void *)drawable;
+    s-&gt;command_buffer = (__bridge_retained void *)cmd;
+    s-&gt;encoder        = (__bridge_retained void *)enc;
+    s-&gt;frame_index    = (s-&gt;frame_index + 1) % 2;
+    return &amp;s-&gt;pass;
+}</code></pre>
+
+<pre><code class="language-objectivec">void ne_renderer_end_frame(NERenderer *r, NERenderSurface *s) {
+    // Close the encoder — this is where the command buffer is finalized
+    [(__bridge id&lt;MTLRenderCommandEncoder&gt;)s-&gt;encoder endEncoding];
+
+    // Register a completion handler that signals our semaphore
+    // → this is what un-blocks begin_frame's semaphore_wait next frame
+    id&lt;MTLCommandBuffer&gt; cmd = (__bridge_transfer id&lt;MTLCommandBuffer&gt;)s-&gt;command_buffer;
+    dispatch_semaphore_t sem = s-&gt;frame_semaphore;
+    [cmd addCompletedHandler:^(id&lt;MTLCommandBuffer&gt; _){ dispatch_semaphore_signal(sem); }];
+
+    // Schedule presentation on the next display refresh
+    id&lt;CAMetalDrawable&gt; drawable = (__bridge_transfer id&lt;CAMetalDrawable&gt;)s-&gt;drawable;
+    [cmd presentDrawable:drawable];
+
+    // Send everything to the GPU
+    [cmd commit];
+
+    s-&gt;encoder = s-&gt;drawable = s-&gt;command_buffer = NULL;
+}</code></pre>
+
+    <h2>Sync — the semaphore, not fences</h2>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Metal frame semaphore">
+        <text x="60" y="30" fill="#22d3ee" font-weight="700">CPU</text>
+        <text x="60" y="150" fill="#f472b6" font-weight="700">GPU</text>
+
+        <!-- Semaphore starts at 2 -->
+        <rect x="90" y="50" width="90" height="40" rx="4" fill="#22d3ee" opacity="0.5"/>
+        <text x="135" y="75" text-anchor="middle" fill="white" font-size="11">Frame 0 wait</text>
+        <text x="135" y="110" text-anchor="middle" fill="#10b981" font-size="10">sem: 2 → 1</text>
+
+        <rect x="200" y="50" width="90" height="40" rx="4" fill="#22d3ee" opacity="0.5"/>
+        <text x="245" y="75" text-anchor="middle" fill="white" font-size="11">Frame 1 wait</text>
+        <text x="245" y="110" text-anchor="middle" fill="#10b981" font-size="10">sem: 1 → 0</text>
+
+        <rect x="310" y="50" width="90" height="40" rx="4" fill="#f59e0b" opacity="0.5"/>
+        <text x="355" y="75" text-anchor="middle" fill="white" font-size="11">Frame 2 wait</text>
+        <text x="355" y="110" text-anchor="middle" fill="#f59e0b" font-size="10">sem: 0 → BLOCK</text>
+
+        <!-- GPU catches up -->
+        <rect x="200" y="170" width="120" height="40" rx="4" fill="#f472b6" opacity="0.5"/>
+        <text x="260" y="195" text-anchor="middle" fill="white" font-size="11">GPU finishes 0</text>
+        <text x="260" y="230" text-anchor="middle" fill="#10b981" font-size="10">signal: 0 → 1</text>
+
+        <!-- Unblock arrow -->
+        <path d="M320 190 Q350 190 355 100" stroke="#10b981" stroke-width="2" fill="none" stroke-dasharray="4 4" marker-end="url(#ah-mtl)"/>
+        <defs><marker id="ah-mtl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#10b981"/></marker></defs>
+
+        <rect x="450" y="50" width="90" height="40" rx="4" fill="#22d3ee" opacity="0.5"/>
+        <text x="495" y="75" text-anchor="middle" fill="white" font-size="11">Frame 2 goes</text>
+        <text x="495" y="110" text-anchor="middle" fill="#10b981" font-size="10">sem: 1 → 0</text>
+      </svg>
+      <div class="diagram-caption">One <code>dispatch_semaphore_t</code> per surface, initialized to 2. Each begin decrements, each GPU completion increments.</div>
+    </div>
+
+    <div class="plain">
+      A <em>dispatch semaphore</em> is macOS's version of a counting semaphore. It has a count. Take one → count goes down. Release one → count goes up. If the count is 0 and you try to take, you block. That's it.
+    </div>
+
+    <h2>Buffers — no staging, no copy commands</h2>
+
+    <p>Apple Silicon has <em>unified memory</em>: the CPU and GPU physically share the same DRAM. There's no notion of "video RAM" — it's all just RAM. This lets the backend skip the whole staging-buffer dance.</p>
+
+<pre><code class="language-objectivec">// Everything uses MTLResourceStorageModeShared
+buffer = [device newBufferWithLength:size options:MTLResourceStorageModeShared];
+
+// Update = plain memcpy into a persistently-mapped pointer
+memcpy((uint8_t *)[buffer contents] + offset, data, size);</code></pre>
+
+    <p>Dynamic buffers still allocate 2 copies (one per in-flight frame), but static buffers allocate only 1. There's no "static vs. staging vs. dynamic" three-way path like Vulkan has — just "shared, always".</p>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ Intel Mac support was dropped</div>
+      <p>Discrete GPUs (which macOS supports on older Intel Macs) can't use <code>Shared</code> storage for GPU-fast reads. The backend intentionally targets Apple Silicon only. Adding Intel support would need <code>StorageModeManaged</code> + <code>didModifyRange:</code>.</p>
+    </div>
+
+    <h2>Shaders — MSL, not SPIR-V</h2>
+
+    <p>Metal doesn't accept SPIR-V. You give it either <strong>MSL source</strong> (Metal Shading Language, a C++ dialect) or a <strong>precompiled metallib blob</strong>.</p>
+
+<pre><code class="language-objectivec">// Path 1: pre-compiled metallib
+NSError *err = nil;
+id&lt;MTLLibrary&gt; lib = [device newLibraryWithData:data error:&amp;err];
+id&lt;MTLFunction&gt; fn = [lib newFunctionWithName:@"vertex_main"];
+
+// Path 2: source (via ne_shader_create_from_source)
+id&lt;MTLLibrary&gt; lib = [device newLibraryWithSource:msl_source
+                                          options:opts
+                                            error:&amp;err];</code></pre>
+
+    <div class="callout info">
+      <div class="callout-title">💡 Future path: Slang</div>
+      <p>The current split (GLSL on Vulkan, WGSL on Web, MSL on Metal) means you write three copies of every shader. A comment in the code hints at a future <a href="https://github.com/shader-slang/slang" target="_blank" rel="noopener">Slang</a> integration that would transpile one source into all three targets.</p>
+    </div>
+
+    <h2>Push constants — Metal calls them "bytes"</h2>
+
+    <p>Metal has native inline uniforms and generously allows up to <strong>4 KB</strong> — 32× what Vulkan guarantees.</p>
+
+<pre><code class="language-objectivec">// From ne_render_pass_set_uniform_data
+[enc setVertexBytes:data length:size atIndex:slot];
+// or
+[enc setFragmentBytes:data length:size atIndex:slot];</code></pre>
+
+    <p>The engine still caps at 128 bytes to match the public API's Vulkan-derived limit — but internally there's tons of room.</p>
+
+    <h2>Pipelines — eager compilation</h2>
+
+    <p>Unlike Vulkan (where compile is deferred until the render pass is known), Metal knows everything it needs at pipeline creation. So compilation is synchronous inside <code>ne_pipeline_create</code>:</p>
+
+<pre><code class="language-objectivec">MTLRenderPipelineDescriptor *pd = [MTLRenderPipelineDescriptor new];
+pd.vertexFunction   = vertex_fn;
+pd.fragmentFunction = fragment_fn;
+pd.colorAttachments[0].pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+// Optional blend state
+if (desc-&gt;blend.enabled) {
+    pd.colorAttachments[0].blendingEnabled = YES;
+    // ... blend factors, ops ...
+}
+
+// Vertex layout
+MTLVertexDescriptor *vd = [MTLVertexDescriptor new];
+for (uint32_t i = 0; i &lt; desc-&gt;vertex_binding_count; i++) { /* fill in */ }
+pd.vertexDescriptor = vd;
+
+// Compile — synchronous, may take a millisecond
+id&lt;MTLRenderPipelineState&gt; pso = [device newRenderPipelineStateWithDescriptor:pd
+                                                                       error:&amp;err];</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ Topology is stored separately</div>
+      <p>Vulkan bakes topology (triangles vs lines vs points) into the pipeline. Metal doesn't — you pass it at draw time. The engine stores it on the slot and applies it in <code>ne_render_pass_draw</code>.</p>
+    </div>
+
+    <h2>Present — via <code>CAMetalLayer</code></h2>
+
+<pre><code class="language-objectivec">// Layer setup at surface-create time
+CAMetalLayer *layer = [CAMetalLayer layer];
+layer.device      = device;
+layer.pixelFormat = MTLPixelFormatBGRA8Unorm;
+
+if (ne_window_is_opaque(window)) {
+    layer.framebufferOnly = YES;   // faster
+    layer.opaque = YES;
+} else {
+    layer.framebufferOnly = NO;    // required for transparency
+    layer.opaque = NO;
+}
+
+if ([layer respondsToSelector:@selector(setDisplaySyncEnabled:)]) {
+    layer.displaySyncEnabled = desc-&gt;vsync ? YES : NO;
+}
+
+// Attach to the window's NSView
+[view setWantsLayer:YES];
+view.layer = layer;</code></pre>
+
+    <h2>What's missing</h2>
+
+    <table>
+      <thead><tr><th>Feature</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td>Image API (<code>ne_image_*</code>)</td><td>❌ Missing entirely — no textures</td></tr>
+        <tr><td>Compute pipelines &amp; passes</td><td>❌ Stubs, log warnings</td></tr>
+        <tr><td>Depth/stencil attachment</td><td>❌ Only color[0] wired up</td></tr>
+        <tr><td><code>enable_validation</code> flag</td><td>❌ Ignored (env-var-driven in Metal)</td></tr>
+        <tr><td>Library cache</td><td>❌ Every shader rebuilds an <code>MTLLibrary</code></td></tr>
+        <tr><td>Intel Mac / discrete GPU path</td><td>❌ Intentional (Apple Silicon only)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <ul>
+        <li><strong>Add textures.</strong> The image API is completely missing — probably the highest-impact gap.</li>
+        <li><strong>Unify with <code>NEPool</code>.</strong> The hand-rolled pool duplicates functionality that already exists in <code>ne_alloc.h</code>. Straightforward refactor.</li>
+        <li><strong>Cache <code>MTLLibrary</code> objects.</strong> A hash-keyed cache would let identical shader source reuse compiled libraries.</li>
+        <li><strong>Wire up depth.</strong> Currently 2D-only.</li>
+        <li><strong>iOS / tvOS support.</strong> The Metal API is the same; only the window/view creation would need alternates.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="backend-vulkan.html"><small>Previous</small>← Vulkan backend</a>
+      <a class="next" href="backend-wgpu.html"><small>Next</small>WebGPU backend →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

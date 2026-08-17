@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>Rough edges — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">Rough edges</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / Rough edges</div>
+    <h1>Rough edges</h1>
+    <p class="lede">The engine is small and works, but it isn't polished. This page lists the known issues, inconsistencies, and gaps — so nothing surprises you.</p>
+
+    <h2>Inconsistencies</h2>
+
+    <div class="callout danger">
+      <div class="callout-title">🐛 <code>ne_renderer_create</code> signature disagrees across backends</div>
+      <p>The public header declares:</p>
+      <pre><code class="language-c">NERenderer *ne_renderer_create(const NERendererDesc *desc);</code></pre>
+      <p>But the Metal and WebGPU backends implement:</p>
+      <pre><code class="language-c">NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc);</code></pre>
+      <p>The <code>main.c</code> demo happens to work because it uses the header's signature and compiles against the Vulkan backend. Fix: unify on one form (probably drop the <code>NEApp</code> arg since the renderer is a singleton).</p>
+    </div>
+
+    <div class="callout danger">
+      <div class="callout-title">🐛 <code>NEImageHandle</code> breaks the handle convention</div>
+      <p>Every other handle is:</p>
+      <pre><code class="language-c">typedef struct NEBufferHandle { uint32_t id; } NEBufferHandle;</code></pre>
+      <p>But images are:</p>
+      <pre><code class="language-c">typedef uint64_t NEImageHandle;</code></pre>
+      <p>Just make it <code>struct { uint32_t id; }</code> like the rest.</p>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ <code>ne_handle.h</code> is empty</div>
+      <p>Reserved but never used. Per-resource handles are declared inline in each resource header. Either delete the file or actually put the shared handle machinery in it.</p>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ Metal doesn't use <code>NEPool</code></div>
+      <p>Vulkan and WebGPU share the pool from <code>ne_alloc.h</code>. Metal duplicates the concept with hand-rolled <code>T*</code>/<code>count</code>/<code>cap</code> fields. Refactor to unify.</p>
+    </div>
+
+    <h2>Stale doc comments</h2>
+
+    <table>
+      <thead><tr><th>Where</th><th>Claim</th><th>Reality</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>ne_vulkan_shaders.c:41</code></td>
+          <td>"no-op stub"</td>
+          <td>Fully implemented via glslang</td>
+        </tr>
+        <tr>
+          <td><code>ne_renderer_buffer.h:127</code></td>
+          <td>"destruction deferred until GPU no longer using"</td>
+          <td>Destruction is immediate; <code>vkDeviceWaitIdle</code> is issued up front</td>
+        </tr>
+        <tr>
+          <td><code>NanoEngine_Architecture.md</code> (older revisions)</td>
+          <td>"CPU is always 2 frames ahead of the GPU"</td>
+          <td>With <code>MAX_FRAMES_IN_FLIGHT=2</code>, the CPU is at most 1 frame ahead</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <h2>Missing features by backend</h2>
+
+    <table>
+      <thead>
+        <tr>
+          <th>Feature</th>
+          <th>Vulkan <span class="pill vulkan">Win</span></th>
+          <th>Metal <span class="pill metal">Mac</span></th>
+          <th>WebGPU <span class="pill wgpu">Web</span></th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr><td>Compute pipelines</td><td>❌ Stub</td><td>❌ Stub</td><td>❌ Stub</td></tr>
+        <tr><td>Images / textures</td><td>✅ (via buffers pool)</td><td>❌ Absent</td><td>❌ Stub</td></tr>
+        <tr><td>Depth attachment</td><td>❌</td><td>❌</td><td>❌</td></tr>
+        <tr><td>Push constants (uniform data)</td><td>✅ Native</td><td>✅ Native</td><td>❌ Not emulated</td></tr>
+        <tr><td>Descriptor sets / bind groups</td><td>❌</td><td>❌</td><td>❌</td></tr>
+        <tr><td>Vsync toggle</td><td>✅</td><td>✅</td><td>❌ Hardcoded to FIFO</td></tr>
+        <tr><td>Multiple concurrent surfaces</td><td>✅</td><td>✅</td><td>❌ Global active pass</td></tr>
+        <tr><td>Bytecode shaders</td><td>✅ SPIR-V</td><td>✅ metallib</td><td>❌ WGSL source only</td></tr>
+        <tr><td>Runtime shader compile</td><td>✅ glslang</td><td>✅ MSL</td><td>❌ (no compile path)</td></tr>
+      </tbody>
+    </table>
+
+    <h2>Architectural gaps</h2>
+
+    <div class="card-grid">
+      <div class="card">
+        <h3>No GPU memory allocator</h3>
+        <p>Every buffer/image calls <code>vkAllocateMemory</code> directly. Real hardware caps allocations at ~4096. Fine for the demo, blocks any real scene.</p>
+      </div>
+      <div class="card">
+        <h3>Single GPU queue</h3>
+        <p>Graphics + present + transfer all share one queue. Uploads serialize with draws. A dedicated transfer queue would parallelize.</p>
+      </div>
+      <div class="card">
+        <h3>Immediate destruction</h3>
+        <p>Destroying a resource issues <code>vkDeviceWaitIdle</code> — stalls the whole GPU. Should be deferred until the GPU has moved past this frame.</p>
+      </div>
+      <div class="card">
+        <h3>Three shader languages</h3>
+        <p>GLSL for Vulkan, MSL for Metal, WGSL for WebGPU. Every shader gets rewritten three times. Slang or SPIRV-Cross would collapse this.</p>
+      </div>
+      <div class="card">
+        <h3>No hot-reload</h3>
+        <p>Shaders need a restart to pick up changes. A file watcher + hot re-link path would speed iteration a lot.</p>
+      </div>
+      <div class="card">
+        <h3>No generational handles</h3>
+        <p>Destroy → new resource in same slot → old handle "works" but points somewhere new. A generation counter in the high bits would fix this.</p>
+      </div>
+    </div>
+
+    <h2>Contributing back</h2>
+
+    <p>The engine is deliberately small — most of these gaps are pretty tractable one-weekend projects. If you want to help, start with:</p>
+
+    <ol>
+      <li><strong>Metal image API</strong> — the biggest single omission on that backend.</li>
+      <li><strong>WebGPU push-constant emulation</strong> — unblocks the biggest cross-backend semantic gap.</li>
+      <li><strong>GPU memory allocator</strong> — integrate VMA or roll a slab allocator.</li>
+      <li><strong>Descriptor sets</strong> — needed for any real uniforms/textures.</li>
+      <li><strong>Deferred destruction</strong> — replace the <code>vkDeviceWaitIdle</code> stalls.</li>
+    </ol>
+
+    <div class="callout info">
+      <div class="callout-title">👀 See also</div>
+      <p><a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">The repo</a> · <a href="https://github.com/Hamza-L/NanoEngine-ai/issues" target="_blank" rel="noopener">Issues</a></p>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="backend-wgpu.html"><small>Previous</small>← WebGPU backend</a>
+      <span></span>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

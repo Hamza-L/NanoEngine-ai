@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>The swapchain — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">The swapchain</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / The swapchain</div>
+    <h1>The swapchain</h1>
+    <p class="lede">The pool of images the display cycles through — and how the engine hides the fact that Windows has <em>two</em> completely different ways to do this.</p>
+
+    <h2>What's a swapchain?</h2>
+
+    <p>To draw smoothly, you need <strong>at least two images</strong>: one the display is showing right now, and one you're drawing the next frame into. When the next frame is ready, they swap. That's a swapchain.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Swapchain cycle">
+        <defs>
+          <marker id="arrow3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/>
+          </marker>
+        </defs>
+
+        <!-- Three swapchain images -->
+        <g>
+          <rect x="120" y="60" width="140" height="90" rx="8" fill="#0f1319" stroke="#22d3ee" stroke-width="2"/>
+          <text x="190" y="90" text-anchor="middle" fill="#22d3ee" font-weight="600">Image 0</text>
+          <text x="190" y="110" text-anchor="middle" fill="#10b981" font-size="12">on screen</text>
+          <text x="190" y="130" text-anchor="middle" fill="#8891a3" font-size="11">the user sees this</text>
+
+          <rect x="290" y="60" width="140" height="90" rx="8" fill="#0f1319" stroke="#f472b6" stroke-width="2"/>
+          <text x="360" y="90" text-anchor="middle" fill="#f472b6" font-weight="600">Image 1</text>
+          <text x="360" y="110" text-anchor="middle" fill="#f59e0b" font-size="12">GPU drawing</text>
+          <text x="360" y="130" text-anchor="middle" fill="#8891a3" font-size="11">next frame going here</text>
+
+          <rect x="460" y="60" width="140" height="90" rx="8" fill="#0f1319" stroke="#8891a3" stroke-width="2"/>
+          <text x="530" y="90" text-anchor="middle" fill="#8891a3" font-weight="600">Image 2</text>
+          <text x="530" y="110" text-anchor="middle" fill="#8891a3" font-size="12">idle</text>
+          <text x="530" y="130" text-anchor="middle" fill="#8891a3" font-size="11">ready when needed</text>
+        </g>
+
+        <!-- Cycle arrow -->
+        <path d="M600 105 Q660 105 660 175 Q660 205 100 205 Q60 205 60 105 Q60 55 120 55" stroke="#22d3ee" stroke-width="2" fill="none" stroke-dasharray="6 4" marker-end="url(#arrow3)"/>
+        <text x="360" y="228" text-anchor="middle" fill="#22d3ee" font-size="13" font-weight="600">Cycle</text>
+        <text x="360" y="248" text-anchor="middle" fill="#8891a3" font-size="11">When the current image is presented, the roles rotate.</text>
+      </svg>
+      <div class="diagram-caption">Usually 2 or 3 images. The driver picks — the engine just asks "which one can I draw into?"</div>
+    </div>
+
+    <h2>The interesting design choice: two backends</h2>
+
+    <p>On Windows, there are actually <em>two</em> ways to present a swapchain image to the screen. Both work, but they trade off differently.</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#f87171,#ef4444)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/></svg></div>
+        <h3>Vulkan WSI (standard)</h3>
+        <p>The "textbook" path. <code>vkCreateSwapchainKHR</code>. Portable. What every Vulkan tutorial shows. Simple.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#a78bfa,#8b5cf6)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2L2 7l10 5 10-5-10-5z"/></svg></div>
+        <h3>DXGI + DirectComposition</h3>
+        <p>Windows' own compositor. More setup, but you get <strong>per-pixel window transparency</strong> — real alpha, real drop shadows, real acrylic looks.</p>
+      </div>
+    </div>
+
+    <p>The engine supports both, chosen at surface creation:</p>
+
+<pre><code class="language-c">// From include/ne_renderer.h
+typedef enum NEPresentBackend {
+    NE_PRESENT_BACKEND_DEFAULT     = 0,
+    NE_PRESENT_BACKEND_VULKAN_WSI  = 0,
+    NE_PRESENT_BACKEND_DXGI        = 1,
+} NEPresentBackend;
+
+// Choose per surface
+NERenderSurface *surface = ne_renderer_create_surface(renderer, window,
+    &amp;(NERenderSurfaceDesc){
+        .vsync = true,
+        .present_backend = NE_PRESENT_BACKEND_DXGI,
+    });</code></pre>
+
+    <h2>How the engine hides the difference</h2>
+
+    <p>This is a genuinely tidy piece of design. Both backends are stored behind a single interface — a struct of function pointers:</p>
+
+<pre><code class="language-c">// From src/renderer/vulkan/ne_swapchain.h
+typedef struct NESwapchainOps {
+    void (*destroy) (NESwapchain *);
+    bool (*recreate)(NESwapchain *, bool vsync);
+    bool (*acquire) (NESwapchain *, VkSemaphore image_available);
+    bool (*present) (NESwapchain *, VkQueue, VkSemaphore render_finished);
+} NESwapchainOps;
+
+struct NESwapchain {
+    NESwapchainOps *ops;    // ← the vtable
+
+    VkFormat format;
+    VkExtent2D extent;
+    uint32_t image_count;
+    VkImage *images;
+    VkImageView *image_views;
+    // ...
+};</code></pre>
+
+    <p>The Vulkan backend's frame loop uses <code>surface-&gt;swapchain-&gt;ops-&gt;acquire(...)</code> and <code>ops-&gt;present(...)</code> — it doesn't know or care which of the two implementations is behind those pointers.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Swapchain interface with two implementations">
+        <!-- Interface at top -->
+        <rect x="220" y="20" width="280" height="90" rx="10" fill="url(#gradIntf)" opacity="0.9"/>
+        <defs>
+          <linearGradient id="gradIntf" x1="0" x2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient>
+        </defs>
+        <text x="360" y="50" text-anchor="middle" fill="white" font-weight="700">NESwapchain (interface)</text>
+        <text x="360" y="72" text-anchor="middle" fill="white" font-size="11" opacity="0.9">destroy · recreate · acquire · present</text>
+        <text x="360" y="92" text-anchor="middle" fill="white" font-size="11" opacity="0.9">the frame loop uses this</text>
+
+        <!-- Two implementations -->
+        <line x1="290" y1="120" x2="180" y2="170" class="arrow"/>
+        <line x1="430" y1="120" x2="540" y2="170" class="arrow"/>
+
+        <rect x="20" y="170" width="320" height="130" rx="10" class="node-box" stroke="#f87171"/>
+        <text x="180" y="200" text-anchor="middle" class="node-text">Vulkan WSI implementation</text>
+        <text x="180" y="220" text-anchor="middle" class="node-sub">ne_swapchain_vulkan_wsi.c (440 LOC)</text>
+        <rect x="40" y="235" width="280" height="50" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="180" y="255" text-anchor="middle" class="node-sub" font-size="11">Uses: vkCreateSwapchainKHR</text>
+        <text x="180" y="272" text-anchor="middle" class="node-sub" font-size="11">Present modes: FIFO / MAILBOX / IMMEDIATE</text>
+
+        <rect x="380" y="170" width="320" height="130" rx="10" class="node-box" stroke="#a78bfa"/>
+        <text x="540" y="200" text-anchor="middle" class="node-text">DXGI implementation</text>
+        <text x="540" y="220" text-anchor="middle" class="node-sub">ne_swapchain_dxgi.c (777 LOC)</text>
+        <rect x="400" y="235" width="280" height="50" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="540" y="252" text-anchor="middle" class="node-sub" font-size="11">Uses: IDXGISwapChain + DirectComposition</text>
+        <text x="540" y="270" text-anchor="middle" class="node-sub" font-size="11">Images imported via VK_KHR_external_memory_win32</text>
+      </svg>
+      <div class="diagram-caption">A tiny vtable makes two very different systems interchangeable.</div>
+    </div>
+
+    <div class="plain">
+      This pattern — a struct of function pointers you swap between implementations — is C's version of "polymorphism" or "interfaces". It's how <code>FILE *</code> in the C standard library works: one type, different underlying drivers.
+    </div>
+
+    <h2>The DXGI path in more detail</h2>
+
+    <p>DXGI is Microsoft's own graphics infrastructure — the same thing DirectX uses. The tricky bit is that we're rendering with <em>Vulkan</em> but presenting with <em>DXGI</em>. How?</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="DXGI import path">
+        <rect x="30" y="30" width="200" height="60" rx="8" class="node-box"/>
+        <text x="130" y="55" text-anchor="middle" class="node-text" font-size="13">Windows DXGI</text>
+        <text x="130" y="75" text-anchor="middle" class="node-sub">makes swapchain images</text>
+
+        <line x1="230" y1="60" x2="290" y2="60" class="arrow"/>
+
+        <rect x="290" y="30" width="200" height="60" rx="8" class="node-box warn"/>
+        <text x="390" y="55" text-anchor="middle" class="node-text" font-size="13">Shared handles</text>
+        <text x="390" y="75" text-anchor="middle" class="node-sub">HANDLE per image</text>
+
+        <line x1="490" y1="60" x2="550" y2="60" class="arrow"/>
+
+        <rect x="550" y="30" width="140" height="60" rx="8" class="node-box accent"/>
+        <text x="620" y="55" text-anchor="middle" class="node-text" font-size="13">Vulkan imports</text>
+        <text x="620" y="75" text-anchor="middle" class="node-sub">as VkImage</text>
+
+        <line x1="620" y1="90" x2="620" y2="130" class="arrow accent"/>
+
+        <rect x="480" y="130" width="200" height="60" rx="8" class="node-box accent-2"/>
+        <text x="580" y="152" text-anchor="middle" class="node-text" font-size="13">Draw normally</text>
+        <text x="580" y="170" text-anchor="middle" class="node-sub">as if it were a regular swapchain</text>
+
+        <line x1="580" y1="190" x2="580" y2="220" class="arrow"/>
+
+        <rect x="440" y="220" width="240" height="45" rx="8" class="node-box good"/>
+        <text x="560" y="243" text-anchor="middle" class="node-text" font-size="13">DirectComposition presents</text>
+      </svg>
+      <div class="diagram-caption">DXGI creates the images, Vulkan borrows them via a shared-handle extension, then DirectComposition puts them on screen with real alpha.</div>
+    </div>
+
+    <p>The magic ingredient is <code>VK_KHR_external_memory_win32</code>, a Vulkan extension that lets you import a Windows-native memory handle as a <code>VkImage</code>. Once imported, Vulkan draws into it exactly like any other image.</p>
+
+    <p>DirectComposition then takes those images and composes them with the rest of the desktop, honoring alpha per-pixel. That's what gives the demo window its transparent-with-shadow look.</p>
+
+    <h2>Present-mode choices (Vulkan WSI path)</h2>
+
+    <p>Vulkan lets you pick <em>how</em> images are handed to the display. The engine's WSI path picks based on the <code>vsync</code> flag:</p>
+
+    <table>
+      <thead><tr><th>Mode</th><th>Behavior</th><th>Vsync?</th><th>Tearing?</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><code>FIFO</code></td>
+          <td>Queue images, present on vsync. Always available.</td>
+          <td>✅</td>
+          <td>❌</td>
+        </tr>
+        <tr>
+          <td><code>MAILBOX</code></td>
+          <td>Present the newest image on vsync, drop older ones. Low latency.</td>
+          <td>✅</td>
+          <td>❌</td>
+        </tr>
+        <tr>
+          <td><code>IMMEDIATE</code></td>
+          <td>Present ASAP, ignore vsync.</td>
+          <td>❌</td>
+          <td>✅</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Preference: <code>vsync = true</code> → FIFO. <code>vsync = false</code> → prefer MAILBOX → IMMEDIATE → fall back to FIFO.</p>
+
+    <h2>Resize handling</h2>
+
+    <p>When the window changes size, the swapchain images no longer match. The engine handles this <strong>lazily</strong>:</p>
+
+    <ol>
+      <li>OS fires a resize event (<code>WM_SIZE</code>).</li>
+      <li>The window handler sets <code>swapchain-&gt;needs_recreate = true</code>. Cheap.</li>
+      <li>On the next <code>begin_frame</code>, the engine sees the flag and calls <code>ops-&gt;recreate(new_size)</code>.</li>
+      <li>The old images are destroyed, new ones created at the right size, and drawing continues.</li>
+    </ol>
+
+    <p>This deferred approach avoids doing expensive work during the resize event itself, which on Windows blocks the main loop.</p>
+
+    <h2>How the three backends compare</h2>
+
+    <table>
+      <thead>
+        <tr><th></th><th>Vulkan WSI</th><th>Vulkan DXGI</th><th>Metal</th><th>WebGPU</th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Object</strong></td>
+          <td><code>VkSwapchainKHR</code></td>
+          <td><code>IDXGISwapChain1</code></td>
+          <td><code>CAMetalLayer</code></td>
+          <td><code>WGPUSurface</code></td>
+        </tr>
+        <tr>
+          <td><strong>"Acquire next"</strong></td>
+          <td><code>vkAcquireNextImageKHR</code></td>
+          <td>Ring index math</td>
+          <td><code>[layer nextDrawable]</code></td>
+          <td><code>wgpuSurfaceGetCurrentTexture</code></td>
+        </tr>
+        <tr>
+          <td><strong>"Present"</strong></td>
+          <td><code>vkQueuePresentKHR</code></td>
+          <td><code>swapchain-&gt;Present1</code></td>
+          <td><code>[cmd_buf presentDrawable:]</code></td>
+          <td>Implicit — the browser does it</td>
+        </tr>
+        <tr>
+          <td><strong>Vsync</strong></td>
+          <td>Present-mode choice</td>
+          <td>DXGI flip flags</td>
+          <td><code>displaySyncEnabled</code></td>
+          <td>Hardcoded to FIFO</td>
+        </tr>
+        <tr>
+          <td><strong>Per-pixel transparency</strong></td>
+          <td>❌</td>
+          <td>✅</td>
+          <td>✅ (<code>opaque = NO</code>)</td>
+          <td>Depends on canvas CSS</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <ul>
+        <li><strong>The DXGI path skips the standard semaphore chain.</strong> It uses a fence + <code>vkDeviceWaitIdle</code> internally, which stalls the GPU. A native DXGI/Vulkan interop fence (via <code>VK_KHR_external_semaphore_win32</code>) would remove the stall.</li>
+        <li><strong>Present-mode isn't exposed through the public API.</strong> You get "vsync on/off" — no way to explicitly ask for MAILBOX for low latency. Adding a <code>NEPresentMode</code> enum would fix this.</li>
+        <li><strong>WebGPU is hardcoded to FIFO.</strong> The public <code>vsync</code> field isn't plumbed through on the web backend.</li>
+        <li><strong>HDR is not supported anywhere.</strong> All backends hardcode <code>BGRA8Unorm</code> (or equivalent). No <code>RGB10A2</code>, no scRGB, no color-space negotiation.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="pipelines.html"><small>Previous</small>← Shaders &amp; pipelines</a>
+      <a class="next" href="backend-vulkan.html"><small>Next</small>Vulkan backend →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

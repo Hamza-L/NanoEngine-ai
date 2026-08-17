@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>WebGPU backend — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">WebGPU backend</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / Backends / WebGPU</div>
+    <div><span class="pill web">Web browser</span> <span class="pill wgpu">WebGPU / emdawnwebgpu</span></div>
+    <h1>WebGPU backend</h1>
+    <p class="lede">1175 lines of C compiled with Emscripten. The interesting part is <em>what runs where</em> — a lot of the "engine" is actually inside your browser.</p>
+
+    <h2>What's WebGPU?</h2>
+
+    <p>WebGPU is a graphics API for the web. It's designed to look like Vulkan/Metal/D3D12 but be safe enough to run untrusted code from any website. Under the hood, your browser (Chrome, Safari, Firefox) implements it on top of the native API — Vulkan on Linux, Metal on Mac, D3D12 on Windows.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="WebGPU stack">
+        <rect x="60" y="30" width="600" height="45" rx="8" fill="url(#gradW1)"/>
+        <defs>
+          <linearGradient id="gradW1" x1="0" x2="1"><stop offset="0" stop-color="#22d3ee"/><stop offset="1" stop-color="#0891b2"/></linearGradient>
+        </defs>
+        <text x="360" y="57" text-anchor="middle" fill="white" font-weight="700">Your NanoEngine code (C)</text>
+
+        <line x1="360" y1="75" x2="360" y2="95" stroke="#3a3f4b" stroke-width="1.5" marker-end="url(#ahw)"/>
+        <defs><marker id="ahw" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#3a3f4b"/></marker></defs>
+
+        <rect x="60" y="95" width="600" height="45" rx="8" class="node-box" stroke="#22d3ee"/>
+        <text x="360" y="122" text-anchor="middle" class="node-text">Emscripten compiles to WebAssembly</text>
+
+        <line x1="360" y1="140" x2="360" y2="160" stroke="#3a3f4b" stroke-width="1.5" marker-end="url(#ahw)"/>
+
+        <rect x="60" y="160" width="600" height="45" rx="8" class="node-box" stroke="#22d3ee"/>
+        <text x="360" y="187" text-anchor="middle" class="node-text">Browser exposes WebGPU JS API to WASM</text>
+
+        <line x1="360" y1="205" x2="360" y2="225" stroke="#3a3f4b" stroke-width="1.5" marker-end="url(#ahw)"/>
+
+        <rect x="60" y="225" width="600" height="30" rx="8" class="node-box"/>
+        <text x="360" y="245" text-anchor="middle" class="node-sub">Browser drives the real GPU: D3D12 (Win), Metal (Mac), Vulkan (Linux)</text>
+      </svg>
+      <div class="diagram-caption">Your C code, compiled to WebAssembly, talks to the browser's WebGPU implementation, which talks to the real graphics driver.</div>
+    </div>
+
+    <h2>The renderer struct</h2>
+
+<pre><code class="language-c">// src/renderer/wgpu/ne_renderer_wgpu.c
+struct NERenderer {
+    WGPUInstance instance;
+    WGPUAdapter  adapter;
+    WGPUDevice   device;
+    WGPUQueue    queue;
+
+    bool device_ready;    // set true once async device setup completes
+    bool device_failed;
+
+    NEPool shaders;       // uses the shared ne_alloc.h pool
+    NEPool buffers;
+    NEPool pipelines;
+
+    WGPUTextureFormat surface_format;   // chosen lazily on first frame
+
+    NEShaderOptimization shader_optimization;   // stored but unused
+};</code></pre>
+
+    <div class="callout info">
+      <div class="callout-title">💡 Uses the shared <code>NEPool</code></div>
+      <p>This backend does the pool-based storage properly, sharing <code>ne_alloc.h</code> with the Vulkan backend. And unlike the Metal backend, it also calls <code>ne_pool_free</code> — freed slots are actually reused.</p>
+    </div>
+
+    <h2>The wrinkle: async device setup</h2>
+
+    <p>Getting a Vulkan or Metal device is synchronous. On WebGPU, it's <strong>asynchronous</strong> — the browser has to ask the user for GPU access, negotiate features, and it all happens through callbacks.</p>
+
+<pre><code class="language-c">NERenderer *ne_renderer_create(const NERendererDesc *desc) {
+    NERenderer *r = calloc(1, sizeof(NERenderer));
+    r-&gt;instance = wgpuCreateInstance(NULL);
+
+    // Kick off adapter request — returns immediately, callback fires later
+    wgpuInstanceRequestAdapter(r-&gt;instance, &amp;opts, (WGPURequestAdapterCallbackInfo){
+        .mode = WGPUCallbackMode_AllowSpontaneous,
+        .callback = ne_wgpu_on_adapter,
+        .userdata1 = r,
+    });
+
+    // Return NOW with device_ready = false
+    return r;
+}
+
+// Fires later:
+static void ne_wgpu_on_adapter(status, adapter, msg, r, _) {
+    r-&gt;adapter = adapter;
+    // Chain: adapter → device
+    wgpuAdapterRequestDevice(adapter, &amp;device_desc, /* callback */ ...);
+}
+
+// Fires later still:
+static void ne_wgpu_on_device(status, device, msg, r, _) {
+    r-&gt;device = device;
+    r-&gt;queue = wgpuDeviceGetQueue(device);
+    r-&gt;device_ready = true;   // ← finally usable
+}</code></pre>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Async device init">
+        <defs>
+          <marker id="ah-wg" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#22d3ee"/>
+          </marker>
+        </defs>
+
+        <rect x="20" y="60" width="160" height="60" rx="8" class="node-box accent-2"/>
+        <text x="100" y="88" text-anchor="middle" class="node-text" font-size="13">ne_renderer_create()</text>
+        <text x="100" y="106" text-anchor="middle" class="node-sub">returns immediately</text>
+
+        <line x1="180" y1="90" x2="220" y2="90" stroke="#22d3ee" stroke-width="2" fill="none" marker-end="url(#ah-wg)"/>
+        <text x="200" y="80" text-anchor="middle" class="node-sub" fill="#22d3ee">later</text>
+
+        <rect x="220" y="60" width="160" height="60" rx="8" class="node-box"/>
+        <text x="300" y="88" text-anchor="middle" class="node-text" font-size="13">on_adapter cb</text>
+        <text x="300" y="106" text-anchor="middle" class="node-sub">requests device</text>
+
+        <line x1="380" y1="90" x2="420" y2="90" stroke="#22d3ee" stroke-width="2" fill="none" marker-end="url(#ah-wg)"/>
+        <text x="400" y="80" text-anchor="middle" class="node-sub" fill="#22d3ee">later</text>
+
+        <rect x="420" y="60" width="160" height="60" rx="8" class="node-box"/>
+        <text x="500" y="88" text-anchor="middle" class="node-text" font-size="13">on_device cb</text>
+        <text x="500" y="106" text-anchor="middle" class="node-sub">device_ready = true</text>
+
+        <line x1="580" y1="90" x2="620" y2="90" stroke="#22d3ee" stroke-width="2" fill="none" marker-end="url(#ah-wg)"/>
+
+        <rect x="620" y="60" width="80" height="60" rx="8" class="node-box good"/>
+        <text x="660" y="95" text-anchor="middle" class="node-text" font-size="12">usable</text>
+
+        <text x="360" y="170" text-anchor="middle" fill="#8891a3" font-size="12">The first several frames after startup may return NULL from begin_frame while the device is still initializing.</text>
+      </svg>
+      <div class="diagram-caption">Every resource-create call gates on <code>device_ready</code>. It's the biggest structural difference from the other backends.</div>
+    </div>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ Callers must tolerate NULL returns during startup</div>
+      <p>The demo doesn't currently handle this well — it just tries to create shaders/pipelines during setup, which return null. Real apps on this backend would need to queue setup work until <code>device_ready</code>.</p>
+    </div>
+
+    <h2>The surface struct</h2>
+
+<pre><code class="language-c">struct NERenderSurface {
+    NERenderer *renderer;
+    NEWindow   *window;
+
+    WGPUSurface surface;
+    char *canvas_selector;      // strdup'd, e.g. "#canvas"
+
+    bool     configured;
+    int32_t  configured_w;
+    int32_t  configured_h;
+
+    float clear_color[4];
+    uint32_t frame_index;       // 0..2 (three frames in flight)
+
+    // Per-frame encoders
+    WGPUCommandEncoder    encoder;
+    WGPURenderPassEncoder pass_encoder;
+    WGPUTextureView       view;
+    WGPUTexture           texture;
+
+    // Pass state
+    WGPUPrimitiveTopology current_topology;
+    NEBufferHandle        current_index_buffer;
+    WGPUIndexFormat       current_index_format;
+};</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">🐛 Single global active pass</div>
+      <p>Unlike Metal (per-surface pass) or Vulkan (per-surface pass), this backend uses a single <code>static NERenderPass g_active_pass</code>. That means <strong>only one surface can be mid-frame at a time</strong>. Multi-window rendering on the web is limited.</p>
+    </div>
+
+    <h2>Frame loop — no explicit present</h2>
+
+<pre><code class="language-c">NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *s) {
+    if (r-&gt;device_failed || !r-&gt;device_ready) return NULL;
+    if (g_active_pass.surface) return NULL;   // global re-entry guard
+
+    // 1. Get current framebuffer size (canvas × device-pixel-ratio)
+    int32_t w, h;
+    ne_window_get_framebuffer_size(s-&gt;window, &amp;w, &amp;h);
+
+    // 2. Lazily pick the surface format on first frame
+    if (r-&gt;surface_format == WGPUTextureFormat_Undefined) {
+        WGPUSurfaceCapabilities caps;
+        wgpuSurfaceGetCapabilities(s-&gt;surface, r-&gt;adapter, &amp;caps);
+        r-&gt;surface_format = caps.formats[0];
+        wgpuSurfaceCapabilitiesFreeMembers(caps);
+    }
+
+    // 3. Re-configure the surface on size change
+    if (!s-&gt;configured || s-&gt;configured_w != w || s-&gt;configured_h != h) {
+        WGPUSurfaceConfiguration cfg = {
+            .device = r-&gt;device,
+            .format = r-&gt;surface_format,
+            .usage  = WGPUTextureUsage_RenderAttachment,
+            .width = w, .height = h,
+            .presentMode = WGPUPresentMode_Fifo,
+            .alphaMode   = WGPUCompositeAlphaMode_Auto,
+        };
+        wgpuSurfaceConfigure(s-&gt;surface, &amp;cfg);
+        s-&gt;configured = true;
+        s-&gt;configured_w = w; s-&gt;configured_h = h;
+    }
+
+    // 4. Acquire the current texture (skip on suboptimal)
+    WGPUSurfaceTexture st;
+    wgpuSurfaceGetCurrentTexture(s-&gt;surface, &amp;st);
+    if (st.status != SuccessOptimal &amp;&amp; st.status != SuccessSuboptimal) return NULL;
+
+    // 5. Command encoder → begin render pass
+    s-&gt;texture = st.texture;
+    s-&gt;view = wgpuTextureCreateView(st.texture, NULL);
+    s-&gt;encoder = wgpuDeviceCreateCommandEncoder(r-&gt;device, NULL);
+
+    WGPURenderPassColorAttachment color = {
+        .view = s-&gt;view,
+        .loadOp = WGPULoadOp_Clear,
+        .storeOp = WGPUStoreOp_Store,
+        .clearValue = { s-&gt;clear_color[0], /* ... */ },
+    };
+    s-&gt;pass_encoder = wgpuCommandEncoderBeginRenderPass(s-&gt;encoder, &amp;(WGPURenderPassDescriptor){
+        .colorAttachmentCount = 1, .colorAttachments = &amp;color,
+    });
+
+    g_active_pass.surface = s;
+    return &amp;g_active_pass;
+}</code></pre>
+
+<pre><code class="language-c">void ne_renderer_end_frame(NERenderer *r, NERenderSurface *s) {
+    wgpuRenderPassEncoderEnd(s-&gt;pass_encoder);
+
+    WGPUCommandBuffer cmd = wgpuCommandEncoderFinish(s-&gt;encoder, NULL);
+    wgpuQueueSubmit(r-&gt;queue, 1, &amp;cmd);
+    wgpuCommandBufferRelease(cmd);
+
+    // Release everything for this frame
+    wgpuRenderPassEncoderRelease(s-&gt;pass_encoder);
+    wgpuCommandEncoderRelease(s-&gt;encoder);
+    wgpuTextureViewRelease(s-&gt;view);
+    wgpuTextureRelease(s-&gt;texture);
+
+    // NO wgpuSurfacePresent() call — the browser presents when
+    // control returns to it (via requestAnimationFrame).
+    g_active_pass.surface = NULL;
+}</code></pre>
+
+    <div class="plain">
+      There's no explicit "present" step. When your main-loop callback returns, the browser draws your frame automatically and schedules the next <code>requestAnimationFrame</code>. This is why the WebGPU backend has no fence or semaphore — the browser handles frame pacing.
+    </div>
+
+    <h2>Shaders — WGSL only</h2>
+
+    <p>WebGPU doesn't have a bytecode format. Every shader is source text in WGSL (WebGPU Shading Language).</p>
+
+<pre><code class="language-wgsl">// shaders/wgsl/basic.wgsl
+struct VertexOut {
+    @builtin(position) pos: vec4&lt;f32&gt;,
+    @location(0) color: vec4&lt;f32&gt;,
+};
+
+@vertex
+fn vs_main(@location(0) in_pos: vec2&lt;f32&gt;, @location(1) in_col: vec4&lt;f32&gt;) -&gt; VertexOut {
+    var out: VertexOut;
+    out.pos = vec4&lt;f32&gt;(in_pos, 0.0, 1.0);
+    out.color = in_col;
+    return out;
+}
+
+@fragment
+fn fs_main(in: VertexOut) -&gt; @location(0) vec4&lt;f32&gt; {
+    return in.color;
+}</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ <code>ne_shader_create</code> (bytecode) is a stub</div>
+      <p>On this backend, only <code>ne_shader_create_from_source</code> works. Passing SPIR-V bytecode logs an error and returns null. The comment in the code: <em>"The browser has no portable shader-bytecode path — SPIR-V passthrough is not available in WebGPU."</em></p>
+    </div>
+
+    <h2>The push-constant gap</h2>
+
+    <p>WebGPU deliberately doesn't have push constants. Uniform data must go through a uniform buffer + bind group. The engine <strong>doesn't yet emulate this</strong>:</p>
+
+<pre><code class="language-c">// From src/renderer/wgpu/ne_renderer_wgpu.c
+void ne_render_pass_set_uniform_data(...) {
+    NE_LOG_WARN("WebGPU has no push-constants / setBytes equivalent. "
+                "Inline uniforms must go through a uniform buffer + bind group, "
+                "which this backend does not yet implement.");
+    // does nothing
+}</code></pre>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        The right fix
+      </div>
+      <p>A ring-buffered uniform buffer that gets bound as a bind group per draw. Every frame, the CPU writes uniform data into a slice of the ring, and the shader indexes into it via a dynamic offset. Standard technique — just needs to be built.</p>
+    </div>
+
+    <h2>Pipelines — eager, but format-gated</h2>
+
+    <p>Compilation is synchronous once you call <code>ne_pipeline_create</code>. But there's a subtle rule: <strong>the surface format must be known first</strong>, which only happens on the first <code>begin_frame</code> call.</p>
+
+<pre><code class="language-c">// From ne_pipeline_create
+if (!r-&gt;device_ready) return (NEPipelineHandle){0};
+if (r-&gt;surface_format == WGPUTextureFormat_Undefined) {
+    NE_LOG_WARN("pipeline create before first begin_frame — format unknown");
+    return (NEPipelineHandle){0};
+}</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ Pipeline-create ordering trap</div>
+      <p>Apps must call <code>begin_frame</code> at least once (may return null, that's fine) before creating any pipelines. The demo works around this because pipelines are created after the first frame has begun.</p>
+    </div>
+
+    <h2>The web platform layer</h2>
+
+    <p>The web build compiles your C code to WebAssembly (WASM) via Emscripten. The engine still needs to translate DOM events into <code>NEKey</code>/mouse coordinates:</p>
+
+<pre><code class="language-c">// src/platform/web/window_web.c
+static const char *NE_WEB_CANVAS_TARGET = "#canvas";
+
+void ne_app_run(NEApp *app) {
+    // Hand control to the browser
+    emscripten_set_main_loop_arg(
+        ne_web_frame_tick,   // called on every rAF
+        app,
+        /* fps = */ 0,       // 0 = use rAF instead of fixed FPS
+        /* simulate_infinite_loop = */ 1
+    );
+    // main() unwinds here, but rAF keeps calling ne_web_frame_tick
+}
+
+static void ne_web_frame_tick(void *user) {
+    NEApp *app = user;
+    for (NEWindow *w = app-&gt;windows; w; w = w-&gt;next) {
+        if (w-&gt;open &amp;&amp; w-&gt;render_frame) w-&gt;render_frame(w-&gt;render_frame_user);
+    }
+}</code></pre>
+
+    <div class="callout warn">
+      <div class="callout-title">⚠️ Stack lifetime gotcha</div>
+      <p>Because <code>main()</code> returns while <code>requestAnimationFrame</code> keeps firing, any state the render callback touches <strong>must not live on <code>main()</code>'s stack</strong>. Put it in globals, or on the heap. The engine's built to avoid this — the frame context in <code>main.c</code> is a stack local, which technically works but only because Emscripten's <code>-sEXIT_RUNTIME=0</code> keeps the WASM heap alive.</p>
+    </div>
+
+    <h3>Event translation</h3>
+
+    <p>DOM events use string codes like <code>"KeyA"</code>, <code>"ArrowUp"</code>. The web layer maps them to <code>NEKey</code>:</p>
+
+<pre><code class="language-c">static NEKey ne_web_map_key(const char *code) {
+    if (strlen(code) == 4 &amp;&amp; strncmp(code, "Key", 3) == 0)
+        return NE_KEY_A + (code[3] - 'A');
+    if (strlen(code) == 6 &amp;&amp; strncmp(code, "Digit", 5) == 0)
+        return NE_KEY_0 + (code[5] - '0');
+    if (strcmp(code, "Escape") == 0)   return NE_KEY_ESCAPE;
+    if (strcmp(code, "ArrowLeft") == 0) return NE_KEY_LEFT;
+    // ...
+}</code></pre>
+
+    <p>Mouse buttons follow DOM order (0=left, 1=middle, 2=right) — this differs from macOS's Cocoa ordering (0=left, 1=right, 2=middle). The engine keeps them separate.</p>
+
+    <h2>What's missing</h2>
+
+    <table>
+      <thead><tr><th>Feature</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><code>ne_render_pass_set_uniform_data</code></td><td>❌ Warning-only stub</td></tr>
+        <tr><td>Bytecode shaders</td><td>❌ Only WGSL source works</td></tr>
+        <tr><td>Images / textures</td><td>❌ Stubs</td></tr>
+        <tr><td>Compute pipelines &amp; passes</td><td>❌ Stubs</td></tr>
+        <tr><td>Vsync configuration</td><td>❌ Hardcoded to FIFO</td></tr>
+        <tr><td>Multiple concurrent surfaces</td><td>❌ Global active pass</td></tr>
+        <tr><td><code>enable_validation</code></td><td>❌ Ignored (WebGPU handles it)</td></tr>
+      </tbody>
+    </table>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <ul>
+        <li><strong>Emulate push constants.</strong> The biggest functional gap. A ring uniform buffer + bind group would fix it.</li>
+        <li><strong>Textures.</strong> WebGPU has full image/texture support — nothing wired up.</li>
+        <li><strong>Startup ordering.</strong> The device-not-ready and format-not-set race conditions surface too aggressively. A queue of "setup work to run once ready" would smooth this over.</li>
+        <li><strong>Multi-surface.</strong> The <code>g_active_pass</code> global is the last barrier to multi-window on the web.</li>
+        <li><strong>Cross-compile shaders.</strong> Every backend has its own shader language. Slang or Tint (WGSL) could bridge.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="backend-metal.html"><small>Previous</small>← Metal backend</a>
+      <a class="next" href="rough-edges.html"><small>Next</small>Rough edges →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

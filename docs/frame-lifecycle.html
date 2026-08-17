@@ -1,0 +1,314 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>A frame, step by step — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">A frame, step by step</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / A frame, step by step</div>
+    <h1>A frame, step by step</h1>
+    <p class="lede">Every frame the engine draws goes through the same eight-step dance. Let's follow one from start to finish.</p>
+
+    <h2>The two players</h2>
+
+    <p>Rendering is fundamentally a conversation between two things:</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#22d3ee,#0ea5e9)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="4" width="16" height="16" rx="2"/><path d="M4 12h16M12 4v16"/></svg></div>
+        <h3>The CPU (your code)</h3>
+        <p>Writes a <strong>to-do list</strong> — "clear the screen, use this pipeline, draw these vertices, show the result". Doesn't do the actual drawing.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#f472b6,#ec4899)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 20 2 20 12 2"/></svg></div>
+        <h3>The GPU (the graphics card)</h3>
+        <p>Reads that to-do list <em>later</em> and performs each command. Very fast at drawing many things in parallel.</p>
+      </div>
+    </div>
+
+    <div class="plain">
+      The CPU is like a chef writing a recipe. The GPU is like an army of kitchen assistants who follow the recipe at high speed. The chef doesn't cook — they only write.
+    </div>
+
+    <h2>The eight steps</h2>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 620" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Frame lifecycle swimlane">
+        <defs>
+          <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#7c5cff"/>
+          </marker>
+        </defs>
+
+        <!-- Column headers -->
+        <text x="180" y="30" text-anchor="middle" fill="#22d3ee" font-weight="700" font-size="16">CPU (your code)</text>
+        <text x="540" y="30" text-anchor="middle" fill="#f472b6" font-weight="700" font-size="16">GPU (graphics card)</text>
+
+        <!-- Vertical dividers -->
+        <line x1="360" y1="45" x2="360" y2="605" stroke="#3a3f4b" stroke-dasharray="4 4"/>
+
+        <!-- Step 1: Wait -->
+        <rect x="40" y="55" width="280" height="55" rx="8" class="node-box accent-2"/>
+        <text x="180" y="78" text-anchor="middle" class="node-text" font-size="14">1. Wait for GPU to finish frame N−2</text>
+        <text x="180" y="97" text-anchor="middle" class="node-sub">"Is fence signaled? Block until yes."</text>
+
+        <rect x="400" y="55" width="280" height="55" rx="8" class="node-box" opacity="0.5"/>
+        <text x="540" y="88" text-anchor="middle" class="node-sub" font-style="italic">…still working on frame N−2</text>
+
+        <!-- Step 2: Acquire -->
+        <line x1="180" y1="110" x2="180" y2="130" class="arrow accent"/>
+        <rect x="40" y="130" width="280" height="55" rx="8" class="node-box accent-2"/>
+        <text x="180" y="153" text-anchor="middle" class="node-text" font-size="14">2. Ask for a swapchain image</text>
+        <text x="180" y="172" text-anchor="middle" class="node-sub">"Give me a fresh canvas to draw on."</text>
+
+        <rect x="400" y="130" width="280" height="55" rx="8" class="node-box" opacity="0.5"/>
+        <text x="540" y="163" text-anchor="middle" class="node-sub" font-style="italic">Driver hands back image #K</text>
+
+        <!-- Step 3: Record -->
+        <line x1="180" y1="185" x2="180" y2="205" class="arrow accent"/>
+        <rect x="40" y="205" width="280" height="120" rx="8" class="node-box accent-2"/>
+        <text x="180" y="228" text-anchor="middle" class="node-text" font-size="14">3. Write the to-do list</text>
+        <text x="180" y="248" text-anchor="middle" class="node-sub">• Begin command buffer</text>
+        <text x="180" y="266" text-anchor="middle" class="node-sub">• Begin render pass (clear screen)</text>
+        <text x="180" y="284" text-anchor="middle" class="node-sub">• Bind pipeline + vertex buffer</text>
+        <text x="180" y="302" text-anchor="middle" class="node-sub">• Draw 3 vertices</text>
+        <text x="180" y="320" text-anchor="middle" class="node-sub">• End pass, end buffer</text>
+
+        <!-- Step 4: Submit -->
+        <line x1="180" y1="325" x2="180" y2="345" class="arrow accent"/>
+        <rect x="40" y="345" width="280" height="55" rx="8" class="node-box accent-2"/>
+        <text x="180" y="368" text-anchor="middle" class="node-text" font-size="14">4. Hand the list to the GPU</text>
+        <text x="180" y="387" text-anchor="middle" class="node-sub">"Queue submit"</text>
+
+        <!-- Arrow across to GPU -->
+        <path d="M320 372 L400 372" stroke="#f472b6" stroke-width="2" fill="none" marker-end="url(#arrowhead)"/>
+
+        <rect x="400" y="345" width="280" height="180" rx="8" class="node-box warn"/>
+        <text x="540" y="370" text-anchor="middle" class="node-text" font-size="14">GPU works</text>
+        <text x="540" y="395" text-anchor="middle" class="node-sub">Executes the command buffer:</text>
+        <text x="540" y="415" text-anchor="middle" class="node-sub">• Runs vertex shader per vertex</text>
+        <text x="540" y="433" text-anchor="middle" class="node-sub">• Rasterizes triangles into pixels</text>
+        <text x="540" y="451" text-anchor="middle" class="node-sub">• Runs fragment shader per pixel</text>
+        <text x="540" y="469" text-anchor="middle" class="node-sub">• Writes into the swapchain image</text>
+        <text x="540" y="495" text-anchor="middle" class="node-sub" fill="#f59e0b">Then signals: "done!"</text>
+        <text x="540" y="513" text-anchor="middle" class="node-sub" fill="#f59e0b">(this unblocks step 1 of frame N+2)</text>
+
+        <!-- Step 5: Present -->
+        <line x1="180" y1="400" x2="180" y2="420" class="arrow accent"/>
+        <rect x="40" y="420" width="280" height="55" rx="8" class="node-box accent-2"/>
+        <text x="180" y="443" text-anchor="middle" class="node-text" font-size="14">5. Ask the OS to show the image</text>
+        <text x="180" y="462" text-anchor="middle" class="node-sub">"Queue present"</text>
+
+        <!-- Step 6: CPU can go start frame N+1 -->
+        <line x1="180" y1="475" x2="180" y2="495" class="arrow accent"/>
+        <rect x="40" y="495" width="280" height="55" rx="8" class="node-box good"/>
+        <text x="180" y="518" text-anchor="middle" class="node-text" font-size="14">6. CPU starts on frame N+1</text>
+        <text x="180" y="537" text-anchor="middle" class="node-sub">(while GPU is still on N)</text>
+
+        <!-- OS presents -->
+        <rect x="400" y="540" width="280" height="55" rx="8" class="node-box"/>
+        <text x="540" y="563" text-anchor="middle" class="node-text" font-size="14">Display shows the pixels</text>
+        <text x="540" y="582" text-anchor="middle" class="node-sub">on the next vsync</text>
+      </svg>
+      <div class="diagram-caption">The CPU (left) and GPU (right) work in parallel. The CPU is usually one frame ahead.</div>
+    </div>
+
+    <h2>The most important idea: <em>frames in flight</em></h2>
+
+    <p>The CPU and GPU work at the same time. While the GPU draws frame 5, the CPU is already writing the to-do list for frame 6. This keeps both busy.</p>
+
+    <p>But we need to make sure the CPU doesn't get <em>too far</em> ahead — otherwise it would overwrite data the GPU is still reading. The engine solves this by allowing exactly <strong>two frames in flight</strong> at a time:</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 300" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Frames in flight timeline">
+        <!-- Timeline -->
+        <text x="40" y="30" fill="#22d3ee" font-weight="700">CPU</text>
+        <text x="40" y="130" fill="#f472b6" font-weight="700">GPU</text>
+        <text x="40" y="230" fill="#10b981" font-weight="700">Display</text>
+
+        <!-- CPU blocks -->
+        <g>
+          <rect x="80"  y="40" width="80" height="40" rx="4" fill="#22d3ee" opacity="0.7"/>
+          <text x="120" y="65" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 0</text>
+          <rect x="170" y="40" width="80" height="40" rx="4" fill="#22d3ee" opacity="0.7"/>
+          <text x="210" y="65" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 1</text>
+          <rect x="260" y="40" width="80" height="40" rx="4" fill="#22d3ee" opacity="0.7"/>
+          <text x="300" y="65" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 2</text>
+          <rect x="350" y="40" width="80" height="40" rx="4" fill="#22d3ee" opacity="0.7"/>
+          <text x="390" y="65" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 3</text>
+          <rect x="440" y="40" width="80" height="40" rx="4" fill="#22d3ee" opacity="0.7"/>
+          <text x="480" y="65" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 4</text>
+          <rect x="530" y="40" width="80" height="40" rx="4" fill="#22d3ee" opacity="0.7"/>
+          <text x="570" y="65" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 5</text>
+        </g>
+
+        <!-- GPU blocks (delayed) -->
+        <g>
+          <rect x="170" y="140" width="80" height="40" rx="4" fill="#f472b6" opacity="0.7"/>
+          <text x="210" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 0</text>
+          <rect x="260" y="140" width="80" height="40" rx="4" fill="#f472b6" opacity="0.7"/>
+          <text x="300" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 1</text>
+          <rect x="350" y="140" width="80" height="40" rx="4" fill="#f472b6" opacity="0.7"/>
+          <text x="390" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 2</text>
+          <rect x="440" y="140" width="80" height="40" rx="4" fill="#f472b6" opacity="0.7"/>
+          <text x="480" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 3</text>
+          <rect x="530" y="140" width="80" height="40" rx="4" fill="#f472b6" opacity="0.7"/>
+          <text x="570" y="165" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 4</text>
+        </g>
+
+        <!-- Display blocks (even more delayed) -->
+        <g>
+          <rect x="260" y="240" width="80" height="40" rx="4" fill="#10b981" opacity="0.7"/>
+          <text x="300" y="265" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 0</text>
+          <rect x="350" y="240" width="80" height="40" rx="4" fill="#10b981" opacity="0.7"/>
+          <text x="390" y="265" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 1</text>
+          <rect x="440" y="240" width="80" height="40" rx="4" fill="#10b981" opacity="0.7"/>
+          <text x="480" y="265" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 2</text>
+          <rect x="530" y="240" width="80" height="40" rx="4" fill="#10b981" opacity="0.7"/>
+          <text x="570" y="265" text-anchor="middle" fill="white" font-size="12" font-weight="600">Frame 3</text>
+        </g>
+
+        <!-- Time axis -->
+        <line x1="80" y1="290" x2="620" y2="290" stroke="#3a3f4b" stroke-width="1"/>
+        <polygon points="620,285 632,290 620,295" fill="#3a3f4b"/>
+        <text x="640" y="294" fill="#8891a3" font-size="11">time →</text>
+      </svg>
+      <div class="diagram-caption">At any moment, the CPU is preparing frame N+1 while the GPU is drawing frame N, and the display is still showing frame N−1.</div>
+    </div>
+
+    <h2>The safety net: fences and semaphores</h2>
+
+    <p>Two kinds of "wait for something" primitives keep everyone in sync:</p>
+
+    <table>
+      <thead><tr><th>Primitive</th><th>Who waits for whom?</th><th>What for?</th></tr></thead>
+      <tbody>
+        <tr>
+          <td><strong>Fence</strong></td>
+          <td>CPU waits for GPU</td>
+          <td>"Is the GPU done with frame N−2 yet? If not, I'll block."</td>
+        </tr>
+        <tr>
+          <td><strong>Semaphore</strong></td>
+          <td>GPU waits for GPU</td>
+          <td>"Don't start drawing until the swapchain image is actually ready."</td>
+        </tr>
+      </tbody>
+    </table>
+
+    <p>Each surface keeps two of each — one per flight frame:</p>
+
+<pre><code class="language-c">// From ne_renderer_vulkan.c
+VkCommandBuffer cmds[2];                  // per flight frame
+VkSemaphore     sem_image_available[2];   // per flight frame
+VkFence         fences_in_flight[2];      // per flight frame
+uint32_t        frame_index;              // wraps 0, 1, 0, 1, ...</code></pre>
+
+    <div class="plain">
+      A fence is a mailbox: the GPU drops a letter in when it finishes. The CPU checks the mailbox. A semaphore is a red light between two GPU steps: the acquire step signals green, the draw step waits for green.
+    </div>
+
+    <h2>What happens when the window resizes?</h2>
+
+    <p>The swapchain images are sized to match the window. If you resize the window, they no longer fit, and the driver tells us so on the next present. The engine responds like this:</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 260" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Resize flow">
+        <rect x="40" y="20" width="200" height="60" rx="8" class="node-box"/>
+        <text x="140" y="45" text-anchor="middle" class="node-text" font-size="13">You drag the window edge</text>
+        <text x="140" y="65" text-anchor="middle" class="node-sub">OS fires WM_SIZE / resize event</text>
+
+        <line x1="240" y1="50" x2="280" y2="50" class="arrow"/>
+
+        <rect x="280" y="20" width="200" height="60" rx="8" class="node-box warn"/>
+        <text x="380" y="45" text-anchor="middle" class="node-text" font-size="13">Set needs_recreate flag</text>
+        <text x="380" y="65" text-anchor="middle" class="node-sub">(cheap — just a bool)</text>
+
+        <line x1="480" y1="50" x2="520" y2="50" class="arrow"/>
+
+        <rect x="520" y="20" width="160" height="60" rx="8" class="node-box"/>
+        <text x="600" y="45" text-anchor="middle" class="node-text" font-size="13">Next frame starts</text>
+
+        <line x1="600" y1="80" x2="600" y2="110" class="arrow warn"/>
+
+        <rect x="440" y="110" width="240" height="60" rx="8" class="node-box warn"/>
+        <text x="560" y="135" text-anchor="middle" class="node-text" font-size="13">begin_frame sees the flag</text>
+        <text x="560" y="155" text-anchor="middle" class="node-sub">Rebuilds swapchain to new size</text>
+
+        <line x1="560" y1="170" x2="560" y2="200" class="arrow accent"/>
+
+        <rect x="440" y="200" width="240" height="45" rx="8" class="node-box accent"/>
+        <text x="560" y="228" text-anchor="middle" class="node-text" font-size="13">Frame draws normally at new size</text>
+      </svg>
+      <div class="diagram-caption">Resize is <em>lazy</em>. The engine defers the expensive rebuild to the top of the next frame.</div>
+    </div>
+
+    <p>On Windows there's an extra twist: while the user is <em>actively</em> dragging the edge, the OS blocks the main loop. The engine works around this by hooking <code>WM_SIZE</code> and calling the render callback <em>inline</em> — so the window keeps updating during the drag.</p>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <p>Two things about the current frame loop could improve:</p>
+      <ul>
+        <li><strong>Only one queue.</strong> The engine uses one GPU queue for everything (graphics + present). Real-world engines split into a "graphics" queue, a "transfer" queue for uploads, and a "compute" queue for GPU jobs — so uploads can happen in parallel with drawing.</li>
+        <li><strong>Only two frames in flight.</strong> Two is safe but a bit conservative. Three would let the CPU work further ahead when the GPU is the bottleneck. It's a config number (<code>NE_VK_MAX_FRAMES_IN_FLIGHT</code>) — trivially bumpable.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="layers.html"><small>Previous</small>← The four layers</a>
+      <a class="next" href="handles.html"><small>Next</small>Handles &amp; pools →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

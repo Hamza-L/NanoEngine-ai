@@ -1,0 +1,238 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>NanoEngine — Documentation</title>
+<meta name="description" content="A small, cross-platform C rendering engine for Windows, macOS, and the web.">
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+
+<div class="app">
+  <div class="backdrop"></div>
+
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div>
+        <div class="brand-title">NanoEngine</div>
+        <div class="brand-sub">Rendering engine in C</div>
+      </div>
+    </a>
+
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
+      </button>
+      <div class="topbar-title">NanoEngine</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="eyebrow">Cross-platform rendering engine, written in C</div>
+    <h1>NanoEngine</h1>
+    <p class="lede">A small engine that draws pictures on your screen. It runs on Windows, macOS, and inside a web browser — with the same code you write once.</p>
+
+    <div style="margin: 2rem 0;">
+      <span class="pill win">Windows</span>
+      <span class="pill mac">macOS</span>
+      <span class="pill web">Web</span>
+      &nbsp;
+      <span class="pill vulkan">Vulkan</span>
+      <span class="pill metal">Metal</span>
+      <span class="pill wgpu">WebGPU</span>
+    </div>
+
+    <h2>What is it?</h2>
+    <p>NanoEngine is roughly 10,000 lines of C code that gives you three things:</p>
+    <ol>
+      <li><strong>A window</strong> — on any of the three platforms above.</li>
+      <li><strong>A way to talk to the graphics card</strong> — buffers of vertices, shaders that draw them, pipelines that stitch it all together.</li>
+      <li><strong>A frame loop</strong> — the heartbeat that pushes one picture to the screen after another.</li>
+    </ol>
+
+    <p>The interesting part is the <em>portability</em>. On Windows, the engine talks to the graphics card through <strong>Vulkan</strong>. On macOS, <strong>Metal</strong>. In a browser, <strong>WebGPU</strong>. Your code doesn't change — the engine picks the right one at build time.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 320" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Portability diagram: one public API, three backends">
+        <defs>
+          <marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#3a3f4b"/>
+          </marker>
+          <linearGradient id="apiGrad" x1="0" x2="1" y1="0" y2="0">
+            <stop offset="0" stop-color="#7c5cff"/>
+            <stop offset="1" stop-color="#22d3ee"/>
+          </linearGradient>
+        </defs>
+
+        <!-- Your app -->
+        <rect x="240" y="20" width="240" height="50" rx="10" fill="#14171c" stroke="#3a3f4b"/>
+        <text x="360" y="45" text-anchor="middle" class="node-text" font-size="15">Your app</text>
+        <text x="360" y="62" text-anchor="middle" class="node-sub">main.c — draws a triangle</text>
+
+        <!-- API strip -->
+        <rect x="120" y="100" width="480" height="46" rx="10" fill="url(#apiGrad)" opacity="0.9"/>
+        <text x="360" y="122" text-anchor="middle" fill="white" font-size="14" font-weight="700" font-family="ui-monospace, monospace">include/ne_renderer*.h</text>
+        <text x="360" y="140" text-anchor="middle" fill="white" font-size="11" opacity="0.9">One public API — same function calls on every platform</text>
+
+        <!-- Arrows down -->
+        <line x1="200" y1="170" x2="200" y2="200" class="arrow"/>
+        <line x1="360" y1="170" x2="360" y2="200" class="arrow"/>
+        <line x1="520" y1="170" x2="520" y2="200" class="arrow"/>
+
+        <!-- Backends -->
+        <rect x="80" y="200" width="240" height="90" rx="10" class="node-box"/>
+        <text x="200" y="228" text-anchor="middle" class="node-text">Windows</text>
+        <text x="200" y="248" text-anchor="middle" class="node-mono" fill="#f87171">Vulkan backend</text>
+        <text x="200" y="270" text-anchor="middle" class="node-sub">src/renderer/vulkan/</text>
+
+        <rect x="240" y="200" width="240" height="90" rx="10" class="node-box"/>
+        <text x="360" y="228" text-anchor="middle" class="node-text">macOS</text>
+        <text x="360" y="248" text-anchor="middle" class="node-mono" fill="#a78bfa">Metal backend</text>
+        <text x="360" y="270" text-anchor="middle" class="node-sub">src/renderer/metal/</text>
+
+        <rect x="400" y="200" width="240" height="90" rx="10" class="node-box"/>
+        <text x="520" y="228" text-anchor="middle" class="node-text">Web browser</text>
+        <text x="520" y="248" text-anchor="middle" class="node-mono" fill="#22d3ee">WebGPU backend</text>
+        <text x="520" y="270" text-anchor="middle" class="node-sub">src/renderer/wgpu/</text>
+      </svg>
+      <div class="diagram-caption">One public API on top. The build system picks exactly one backend to compile.</div>
+    </div>
+
+    <div class="plain">
+      Think of the public API as a light switch on the wall. On Windows, the wire behind it goes to Vulkan. On macOS, it goes to Metal. In a browser, it goes to WebGPU. Same switch, different wiring.
+    </div>
+
+    <h2>What can you do with it today?</h2>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l3 3 5-6"/></svg>
+        </div>
+        <h3>Open a window</h3>
+        <p>Borderless, dark-mode, DPI-aware. Custom title bar on Windows. Cocoa-native on macOS. HTML canvas on the web.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 20 2 20 12 2"/></svg>
+        </div>
+        <h3>Draw a triangle</h3>
+        <p>Static or animated. With per-frame updates through a special kind of buffer that avoids copies.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 4h16v6H4zM4 14h16v6H4z"/></svg>
+        </div>
+        <h3>Load shaders</h3>
+        <p>Pre-compiled bytecode for shipping, or plain GLSL text — the engine compiles it at startup.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><path d="M12 3v18M3 12h18"/></svg>
+        </div>
+        <h3>Transparent windows</h3>
+        <p>On Windows, an optional DXGI + DirectComposition path lets you present through Windows' own compositor for per-pixel alpha.</p>
+      </div>
+    </div>
+
+    <h2>How the code is organized</h2>
+
+    <p>The full project tree is about 30 files. The important shape:</p>
+
+<pre class="ascii">
+NanoEngine/
+├── <span class="hi">include/</span>              ← The public API. Platform-neutral.
+│   ├── ne_app.h              App lifecycle (start/stop)
+│   ├── ne_window.h           Windows &amp; input events
+│   ├── ne_renderer.h         Renderer &amp; surfaces
+│   ├── ne_renderer_buffer.h  GPU memory
+│   ├── ne_renderer_shader.h  Shaders
+│   ├── ne_renderer_pipeline.h  Pipelines (drawing "recipes")
+│   └── ne_renderer_pass.h    Drawing commands
+│
+├── <span class="hi">src/</span>
+│   ├── main.c                Demo — a spinning triangle
+│   ├── platform/
+│   │   ├── <span class="hi2">win32/</span>            Windows implementation
+│   │   ├── <span class="hi2">macos/</span>            macOS implementation
+│   │   └── <span class="hi2">web/</span>              Browser implementation
+│   └── renderer/
+│       ├── <span class="hi2">vulkan/</span>           Windows backend (biggest)
+│       ├── <span class="hi2">metal/</span>            macOS backend
+│       └── <span class="hi2">wgpu/</span>             Web backend
+│
+├── shaders/               GLSL and WGSL source
+└── Makefile               Chooses which backend to build
+</pre>
+
+    <p>The rest of this documentation walks through each piece — starting with the big picture (<a href="layers.html">the four layers</a>), then zooming into the details.</p>
+
+    <h2>Where to go next</h2>
+
+    <div class="card-grid">
+      <a class="tile-link card" href="getting-started.html">
+        <h3>Getting started →</h3>
+        <p>Build the demo, run it, walk through what <code>main.c</code> does.</p>
+      </a>
+      <a class="tile-link card" href="layers.html">
+        <h3>The four layers →</h3>
+        <p>How <code>App</code>, <code>Window</code>, <code>Renderer</code>, and <code>Surface</code> fit together.</p>
+      </a>
+      <a class="tile-link card" href="frame-lifecycle.html">
+        <h3>A frame, step by step →</h3>
+        <p>What actually happens between "start drawing" and "show it on screen".</p>
+      </a>
+      <a class="tile-link card" href="backend-vulkan.html">
+        <h3>Backend deep-dives →</h3>
+        <p>How Vulkan, Metal, and WebGPU each implement the same API.</p>
+      </a>
+    </div>
+
+    <div class="page-nav">
+      <span></span>
+      <a class="next" href="getting-started.html">
+        <small>Next</small>
+        Getting started →
+      </a>
+    </div>
+  </main>
+</div>
+
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

@@ -1,0 +1,268 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>Handles &amp; pools — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">Handles &amp; pools</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / Handles &amp; pools</div>
+    <h1>Handles &amp; pools</h1>
+    <p class="lede">Instead of returning raw pointers, the engine hands you tiny integer "tickets". Here's why, and how the tickets work.</p>
+
+    <h2>The problem with raw pointers</h2>
+
+    <p>If <code>ne_buffer_create()</code> returned a <code>void *</code>, you'd have to worry about:</p>
+
+    <ul>
+      <li>What if I use it after it's been destroyed? (Crash.)</li>
+      <li>What if I check <code>if (buf != NULL)</code> — does that mean it's valid? (Only if nothing else freed it.)</li>
+      <li>Where in memory does it live? (Wherever <code>malloc</code> felt like putting it.)</li>
+    </ul>
+
+    <p>Handles fix all three problems.</p>
+
+    <h2>What a handle looks like</h2>
+
+<pre><code class="language-c">// From include/ne_renderer_buffer.h
+typedef struct NEBufferHandle {
+    uint32_t id;
+} NEBufferHandle;</code></pre>
+
+    <p>Just a 32-bit number. <code>id == 0</code> is the null / invalid handle. <code>id == 1</code> means "the resource at pool slot 0".</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Handle to pool slot mapping">
+        <!-- Your code -->
+        <rect x="40" y="40" width="200" height="80" rx="8" class="node-box accent-2"/>
+        <text x="140" y="65" text-anchor="middle" class="node-text">Your code holds</text>
+        <rect x="70" y="80" width="140" height="30" rx="4" fill="#0f1319" stroke="#22d3ee"/>
+        <text x="140" y="100" text-anchor="middle" class="node-mono" fill="#22d3ee">NEBufferHandle { id = 3 }</text>
+
+        <!-- Arrow -->
+        <line x1="240" y1="80" x2="380" y2="80" class="arrow accent-2"/>
+        <text x="310" y="70" text-anchor="middle" class="node-sub" fill="#22d3ee">means: pool slot 3−1 = 2</text>
+
+        <!-- Pool -->
+        <rect x="400" y="20" width="280" height="300" rx="8" class="node-box"/>
+        <text x="540" y="45" text-anchor="middle" class="node-text">Buffers pool</text>
+        <text x="540" y="63" text-anchor="middle" class="node-sub">(the engine's internal storage)</text>
+
+        <!-- Slots -->
+        <rect x="420" y="75"  width="240" height="40" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="435" y="100" fill="#f59e0b" font-size="12" font-family="ui-monospace, monospace">slot 0</text>
+        <text x="540" y="100" text-anchor="middle" fill="#10b981" font-size="12">occupied ✓</text>
+        <text x="640" y="100" text-anchor="end" class="node-sub">VkBuffer, Mem</text>
+
+        <rect x="420" y="120" width="240" height="40" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="435" y="145" fill="#f59e0b" font-size="12" font-family="ui-monospace, monospace">slot 1</text>
+        <text x="540" y="145" text-anchor="middle" fill="#8891a3" font-size="12">free</text>
+
+        <rect x="420" y="165" width="240" height="40" rx="4" fill="#0f1319" stroke="#22d3ee" stroke-width="2"/>
+        <text x="435" y="190" fill="#22d3ee" font-size="12" font-family="ui-monospace, monospace">slot 2 ←</text>
+        <text x="540" y="190" text-anchor="middle" fill="#10b981" font-size="12">occupied ✓</text>
+        <text x="640" y="190" text-anchor="end" class="node-sub">VkBuffer, Mem</text>
+
+        <rect x="420" y="210" width="240" height="40" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="435" y="235" fill="#f59e0b" font-size="12" font-family="ui-monospace, monospace">slot 3</text>
+        <text x="540" y="235" text-anchor="middle" fill="#10b981" font-size="12">occupied ✓</text>
+        <text x="640" y="235" text-anchor="end" class="node-sub">VkBuffer, Mem</text>
+
+        <rect x="420" y="255" width="240" height="40" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="435" y="280" fill="#f59e0b" font-size="12" font-family="ui-monospace, monospace">slot 4</text>
+        <text x="540" y="280" text-anchor="middle" fill="#8891a3" font-size="12">free</text>
+      </svg>
+      <div class="diagram-caption"><code>handle.id = slot_index + 1</code>. That way <code>id = 0</code> unambiguously means "invalid".</div>
+    </div>
+
+    <h2>Why this is nicer than raw pointers</h2>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#10b981,#059669)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 6 9 17l-5-5"/></svg></div>
+        <h3>Validation is one compare</h3>
+        <p><code>if (handle.id == 0)</code> — that's the entire "is this valid?" check.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#f59e0b,#d97706)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 9v4M12 17h.01M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/></svg></div>
+        <h3>Dangling references caught</h3>
+        <p>If you destroy a resource and then use the old handle, the engine looks at the slot, sees <code>occupied = false</code>, and warns instead of crashing.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#a78bfa,#8b5cf6)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M3 15h18M9 3v18M15 3v18"/></svg></div>
+        <h3>Memory is contiguous</h3>
+        <p>All slots live in one flat array. Cache-friendly, no fragmentation, easy to grow.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#22d3ee,#0891b2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 2v20M2 12h20"/></svg></div>
+        <h3>Small &amp; cheap to pass</h3>
+        <p>4 bytes. Fits in a register. Copies are free. No refcounting.</p>
+      </div>
+    </div>
+
+    <h2>The pool underneath</h2>
+
+    <p>Every kind of resource has its own pool. Every pool is a flat array of fixed-size slots. Every slot starts with one byte: <code>bool occupied</code>. The pool doesn't know or care what's in the rest of the slot.</p>
+
+<pre><code class="language-c">// From src/ne_alloc.c — the essential shape (simplified)
+typedef struct NEPool {
+    uint8_t  *slots;      // flat array of slot_size bytes each
+    size_t    slot_size;
+    uint32_t  count;      // how many slots exist right now
+    uint32_t  hint;       // scan starts here
+} NEPool;
+
+// Every slot type looks like this:
+typedef struct NEVulkanBufferSlot {
+    bool     occupied;    // MUST be first byte
+    // ... type-specific fields ...
+    VkBuffer buffer;
+    VkDeviceMemory memory;
+} NEVulkanBufferSlot;</code></pre>
+
+    <h3>Allocating a slot</h3>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Pool allocation scan">
+        <text x="360" y="25" text-anchor="middle" fill="#8891a3" font-size="12">hint = 2 (start looking here)</text>
+        <line x1="230" y1="30" x2="230" y2="55" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowhead)"/>
+        <defs><marker id="arrowhead" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#f59e0b"/></marker></defs>
+
+        <g font-family="ui-monospace, monospace" font-size="14">
+          <rect x="80"  y="60" width="80" height="60" rx="4" fill="#10b981" opacity="0.25" stroke="#10b981"/>
+          <text x="120" y="88" text-anchor="middle" fill="#10b981">USED</text>
+          <text x="120" y="107" text-anchor="middle" fill="#10b981" font-size="11">slot 0</text>
+
+          <rect x="170" y="60" width="80" height="60" rx="4" fill="#10b981" opacity="0.25" stroke="#10b981"/>
+          <text x="210" y="88" text-anchor="middle" fill="#10b981">USED</text>
+          <text x="210" y="107" text-anchor="middle" fill="#10b981" font-size="11">slot 1</text>
+
+          <rect x="260" y="60" width="80" height="60" rx="4" fill="#22d3ee" opacity="0.3" stroke="#22d3ee" stroke-width="2"/>
+          <text x="300" y="88" text-anchor="middle" fill="#22d3ee" font-weight="700">FREE →</text>
+          <text x="300" y="107" text-anchor="middle" fill="#22d3ee" font-size="11">slot 2 ← chosen</text>
+
+          <rect x="350" y="60" width="80" height="60" rx="4" fill="#10b981" opacity="0.25" stroke="#10b981"/>
+          <text x="390" y="88" text-anchor="middle" fill="#10b981">USED</text>
+          <text x="390" y="107" text-anchor="middle" fill="#10b981" font-size="11">slot 3</text>
+
+          <rect x="440" y="60" width="80" height="60" rx="4" fill="#10b981" opacity="0.25" stroke="#10b981"/>
+          <text x="480" y="88" text-anchor="middle" fill="#10b981">USED</text>
+          <text x="480" y="107" text-anchor="middle" fill="#10b981" font-size="11">slot 4</text>
+
+          <rect x="530" y="60" width="80" height="60" rx="4" fill="#8891a3" opacity="0.2" stroke="#8891a3"/>
+          <text x="570" y="88" text-anchor="middle" fill="#8891a3">FREE</text>
+          <text x="570" y="107" text-anchor="middle" fill="#8891a3" font-size="11">slot 5</text>
+
+          <rect x="620" y="60" width="60" height="60" rx="4" fill="#8891a3" opacity="0.2" stroke="#8891a3" stroke-dasharray="4 4"/>
+          <text x="650" y="88" text-anchor="middle" fill="#8891a3">…</text>
+        </g>
+
+        <!-- Description -->
+        <text x="360" y="155" text-anchor="middle" fill="#e7eaf0" font-size="14">Scan from <tspan font-family="ui-monospace,monospace" fill="#f59e0b">hint</tspan> looking for the first FREE slot.</text>
+        <text x="360" y="177" text-anchor="middle" fill="#8891a3" font-size="13">If none found, wrap to 0. If still none, double the pool size.</text>
+        <text x="360" y="199" text-anchor="middle" fill="#8891a3" font-size="13">Set <tspan font-family="ui-monospace,monospace" fill="#e7eaf0">occupied = true</tspan> and return the slot's index.</text>
+      </svg>
+      <div class="diagram-caption">Slot allocation is a linear scan. Fast when the pool isn't full.</div>
+    </div>
+
+    <h3>Freeing a slot</h3>
+
+    <p>Just flip <code>occupied = false</code>. If the freed slot is before the hint, rewind the hint so the next allocation finds it quickly. That's it.</p>
+
+    <h3>Growing the pool</h3>
+
+    <p>Starts at 16 slots. When full, doubles: 16 → 32 → 64 → … The old <code>realloc</code>ed array grows in place if possible; otherwise memory is copied.</p>
+
+    <div class="callout info">
+      <div class="callout-title">🎯 Same pattern id Software used in Quake</div>
+      <p>The "flat array of slots with a scan-from-hint allocator" is a very old, very well-tested pattern. It's simple, fast for small-to-medium counts, and has zero fragmentation within a pool. The trade-off is that it's not thread-safe — but neither is the rest of the engine.</p>
+    </div>
+
+    <h2>The three pools</h2>
+
+    <p>The renderer holds three pools, one per resource kind:</p>
+
+<pre><code class="language-c">// From src/renderer/vulkan/internal/ne_vulkan_renderer.h
+struct NERenderer {
+    // ...
+    NEPool buffers;    // NEVulkanBufferSlot × N   (also stores images)
+    NEPool shaders;    // NEVulkanShaderSlot × N
+    NEPool pipelines;  // NEVulkanPipelineSlot × N
+    // ...
+};</code></pre>
+
+    <p>Each pool stores a different slot type, but they all share the same underlying <code>NEPool</code> machinery. Handles from different pools are distinct types (<code>NEBufferHandle</code> vs <code>NEShaderHandle</code>) so the type system stops you from mixing them up.</p>
+
+    <div class="callout warn">
+      <div class="callout-title">🐛 Odd corner: images share the buffers pool</div>
+      <p>Vulkan images live in the same pool as buffers, using a union in the slot struct. This works but is a bit of an inconsistency. Also, <code>NEImageHandle</code> is a raw <code>uint64_t</code> instead of the <code>struct { uint32_t id; }</code> shape used by every other handle. See <a href="rough-edges.html">Rough edges</a>.</p>
+    </div>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <p>The handle system works but is one small step away from being much sturdier:</p>
+      <ul>
+        <li><strong>Generational handles.</strong> Right now, if you destroy a buffer and quickly create a new one, the new buffer might live in the exact same slot. If you still had the old handle, it'd point at the new buffer without you noticing. A "generation counter" in the high bits of the handle (say, top 8 bits = generation, bottom 24 = slot) would catch this — every destroy bumps the generation, so old handles fail cleanly.</li>
+        <li><strong>Unify the image handle.</strong> <code>NEImageHandle</code> should be <code>struct { uint32_t id; }</code> like the others.</li>
+        <li><strong>Split images into their own pool.</strong> Buffers and images have very different lifetimes and sizes; sharing a pool via union costs memory when one type dominates.</li>
+        <li><strong>Thread safety.</strong> No mutex on the pool right now. Fine for a single-threaded engine; would need locks (or per-thread pools) for multithreaded resource creation.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="frame-lifecycle.html"><small>Previous</small>← A frame, step by step</a>
+      <a class="next" href="buffers.html"><small>Next</small>Buffers &amp; memory →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>

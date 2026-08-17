@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="theme-color" content="#0b0d10">
+<title>Shaders &amp; pipelines — NanoEngine</title>
+<link rel="stylesheet" href="assets/style.css">
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/styles/github-dark-dimmed.min.css">
+</head>
+<body>
+<div class="app">
+  <div class="backdrop"></div>
+  <aside class="sidebar" id="sidebar">
+    <a class="brand" href="index.html">
+      <div class="brand-mark">NE</div>
+      <div><div class="brand-title">NanoEngine</div><div class="brand-sub">Rendering engine in C</div></div>
+    </a>
+    <div class="nav-section">Start here</div>
+    <nav class="nav">
+      <a href="index.html">Overview</a>
+      <a href="getting-started.html">Getting started</a>
+    </nav>
+    <div class="nav-section">Core concepts</div>
+    <nav class="nav">
+      <a href="layers.html">The four layers</a>
+      <a href="frame-lifecycle.html">A frame, step by step</a>
+      <a href="handles.html">Handles &amp; pools</a>
+      <a href="buffers.html">Buffers &amp; memory</a>
+      <a href="pipelines.html">Shaders &amp; pipelines</a>
+      <a href="swapchain.html">The swapchain</a>
+    </nav>
+    <div class="nav-section">Backends</div>
+    <nav class="nav">
+      <a href="backend-vulkan.html">Vulkan (Windows)</a>
+      <a href="backend-metal.html">Metal (macOS)</a>
+      <a href="backend-wgpu.html">WebGPU (Web)</a>
+    </nav>
+    <div class="nav-section">Reference</div>
+    <nav class="nav">
+      <a href="rough-edges.html">Rough edges</a>
+      <a href="https://github.com/Hamza-L/NanoEngine-ai" target="_blank" rel="noopener">GitHub repo ↗</a>
+    </nav>
+  </aside>
+
+  <main class="content">
+    <div class="topbar">
+      <button class="hamburger" aria-label="Menu"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg></button>
+      <div class="topbar-title">Shaders &amp; pipelines</div>
+      <div style="width:40px"></div>
+    </div>
+
+    <div class="breadcrumb"><a href="index.html">Home</a> / Shaders &amp; pipelines</div>
+    <h1>Shaders &amp; pipelines</h1>
+    <p class="lede">A shader is a tiny program that runs on the graphics card. A pipeline bundles two shaders plus the rules for turning vertices into pixels.</p>
+
+    <h2>What's a shader?</h2>
+
+    <p>Shaders are small programs written in a special C-like language. There are two kinds you'll use in this engine:</p>
+
+    <div class="card-grid">
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#7c5cff,#a78bfa)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 22 20 2 20 12 2"/></svg></div>
+        <h3>Vertex shader</h3>
+        <p>Runs <strong>once per vertex</strong>. Given the vertex's raw data (position, color, etc.), computes where on the screen it should appear.</p>
+      </div>
+      <div class="card">
+        <div class="card-icon" style="background:linear-gradient(135deg,#22d3ee,#0891b2)"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M8 12l3 3 5-6"/></svg></div>
+        <h3>Fragment shader</h3>
+        <p>Runs <strong>once per pixel</strong> (kind of). Computes the color of each pixel inside the triangle.</p>
+      </div>
+    </div>
+
+    <p>Here's the demo's vertex shader — 8 lines of GLSL:</p>
+
+<pre><code class="language-glsl">// shaders/glsl/basic.vert
+#version 450
+layout(location = 0) in vec2 in_position;
+layout(location = 1) in vec4 in_color;
+layout(location = 0) out vec4 frag_color;
+
+void main() {
+    gl_Position = vec4(in_position, 0.0, 1.0);
+    frag_color  = in_color;
+}</code></pre>
+
+    <p>And the fragment shader — even shorter:</p>
+
+<pre><code class="language-glsl">// shaders/glsl/basic.frag
+#version 450
+layout(location = 0) in  vec4 frag_color;
+layout(location = 0) out vec4 out_color;
+
+void main() {
+    out_color = frag_color;
+}</code></pre>
+
+    <div class="plain">
+      The vertex shader says "put this vertex at this screen position". The fragment shader says "make this pixel this color". Both are called many times — a triangle covering 100 pixels calls the fragment shader 100 times, in parallel.
+    </div>
+
+    <h2>Two ways to load a shader</h2>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Shader loading paths">
+        <defs>
+          <marker id="arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#7c5cff"/>
+          </marker>
+        </defs>
+
+        <!-- Path 1: precompiled -->
+        <rect x="20" y="20" width="680" height="130" rx="10" fill="#0f1319" stroke="#10b981" stroke-dasharray="6 4"/>
+        <text x="360" y="45" text-anchor="middle" fill="#10b981" font-weight="700">Path 1 — Production (pre-compiled SPIR-V)</text>
+
+        <rect x="60" y="70" width="140" height="60" rx="6" class="node-box"/>
+        <text x="130" y="95" text-anchor="middle" class="node-text" font-size="12">basic.vert</text>
+        <text x="130" y="115" text-anchor="middle" class="node-sub">GLSL source</text>
+
+        <line x1="200" y1="100" x2="240" y2="100" class="arrow accent"/>
+        <text x="220" y="90" text-anchor="middle" class="node-sub">at build time</text>
+
+        <rect x="240" y="70" width="140" height="60" rx="6" class="node-box"/>
+        <text x="310" y="95" text-anchor="middle" class="node-text" font-size="12">glslang.exe</text>
+        <text x="310" y="115" text-anchor="middle" class="node-sub">compiler</text>
+
+        <line x1="380" y1="100" x2="420" y2="100" class="arrow accent"/>
+
+        <rect x="420" y="70" width="140" height="60" rx="6" class="node-box good"/>
+        <text x="490" y="95" text-anchor="middle" class="node-text" font-size="12">basic.vert.spv</text>
+        <text x="490" y="115" text-anchor="middle" class="node-sub">SPIR-V bytecode</text>
+
+        <line x1="560" y1="100" x2="600" y2="100" class="arrow accent"/>
+        <text x="580" y="90" text-anchor="middle" class="node-sub">at runtime</text>
+
+        <rect x="600" y="70" width="80" height="60" rx="6" class="node-box accent"/>
+        <text x="640" y="105" text-anchor="middle" class="node-text" font-size="12">GPU</text>
+
+        <!-- Path 2: runtime GLSL -->
+        <rect x="20" y="170" width="680" height="150" rx="10" fill="#0f1319" stroke="#f59e0b" stroke-dasharray="6 4"/>
+        <text x="360" y="195" text-anchor="middle" fill="#f59e0b" font-weight="700">Path 2 — Development (runtime GLSL)</text>
+
+        <rect x="60" y="220" width="140" height="60" rx="6" class="node-box"/>
+        <text x="130" y="245" text-anchor="middle" class="node-text" font-size="12">basic.vert</text>
+        <text x="130" y="265" text-anchor="middle" class="node-sub">GLSL source</text>
+
+        <line x1="200" y1="250" x2="240" y2="250" class="arrow accent"/>
+        <text x="220" y="240" text-anchor="middle" class="node-sub">at startup</text>
+
+        <rect x="240" y="220" width="140" height="60" rx="6" class="node-box warn"/>
+        <text x="310" y="245" text-anchor="middle" class="node-text" font-size="12">glslang library</text>
+        <text x="310" y="265" text-anchor="middle" class="node-sub">linked in</text>
+
+        <line x1="380" y1="250" x2="420" y2="250" class="arrow accent"/>
+
+        <rect x="420" y="220" width="140" height="60" rx="6" class="node-box"/>
+        <text x="490" y="245" text-anchor="middle" class="node-text" font-size="12">SPIR-V in RAM</text>
+        <text x="490" y="265" text-anchor="middle" class="node-sub">(never touches disk)</text>
+
+        <line x1="560" y1="250" x2="600" y2="250" class="arrow accent"/>
+
+        <rect x="600" y="220" width="80" height="60" rx="6" class="node-box accent"/>
+        <text x="640" y="255" text-anchor="middle" class="node-text" font-size="12">GPU</text>
+
+        <text x="360" y="305" text-anchor="middle" fill="#8891a3" font-size="12">Slower startup, but you can edit and reload without rebuilding the engine.</text>
+      </svg>
+      <div class="diagram-caption">Both paths end up in the same place. The difference is who compiles the GLSL and when.</div>
+    </div>
+
+    <h3>Pre-compiled path — <code>ne_shader_create</code></h3>
+
+<pre><code class="language-c">size_t vert_size;
+void *vert_spv = ne_file_read("build/shaders/basic.vert.spv", &amp;vert_size);
+
+NEShaderHandle vs = ne_shader_create(renderer, &amp;(NEShaderDesc){
+    .stage = NE_SHADER_STAGE_VERTEX,
+    .bytecode = vert_spv,
+    .bytecode_size = vert_size,
+    .entry_point = "main",
+});</code></pre>
+
+    <h3>Runtime path — <code>ne_shader_create_from_source</code></h3>
+
+<pre><code class="language-c">const char *vert_glsl = /* raw GLSL text — read from disk or embedded */;
+
+NEShaderHandle vs = ne_shader_create_from_source(renderer, &amp;(NEShaderSourceDesc){
+    .stage = NE_SHADER_STAGE_VERTEX,
+    .source = vert_glsl,
+    .source_size = strlen(vert_glsl),
+    .entry_point = "main",
+});</code></pre>
+
+    <p>Under the hood, this calls <code>glslang_shader_create</code> → <code>preprocess</code> → <code>parse</code> → <code>link</code> → <code>SPIRV_generate</code>, then feeds the result through the pre-compiled path.</p>
+
+    <h2>What's a pipeline?</h2>
+
+    <p>A pipeline is a <strong>recipe</strong> for drawing. It bundles:</p>
+
+    <ul>
+      <li>A vertex shader and a fragment shader</li>
+      <li>The layout of vertex data — "position is 8 bytes at offset 0, color is 16 bytes at offset 8"</li>
+      <li>What kind of primitives — triangles, lines, points</li>
+      <li>Blend state — how new pixels combine with what's already there</li>
+      <li>Depth/stencil settings (not used in the demo)</li>
+    </ul>
+
+    <p>Once you build a pipeline, you can bind it during a frame and issue many draw calls against it — the recipe stays valid until you swap it out.</p>
+
+<pre><code class="language-c">NEPipelineHandle pipeline = ne_pipeline_create(renderer, &amp;(NEPipelineDesc){
+    .vertex_shader   = vs,
+    .fragment_shader = fs,
+    .topology        = NE_TOPOLOGY_TRIANGLE_LIST,
+
+    .vertex_bindings = &amp;(NEVertexBinding){
+        .stride = sizeof(Vertex),   // 24 bytes per vertex
+        .attributes = (NEVertexAttribute[]){
+            { .location = 0, .format = NE_FORMAT_R32G32_FLOAT,  .offset = 0 },
+            { .location = 1, .format = NE_FORMAT_R32G32B32A32_FLOAT, .offset = 8 },
+        },
+        .attribute_count = 2,
+    },
+    .vertex_binding_count = 1,
+});</code></pre>
+
+    <h2>The neat trick: deferred compilation</h2>
+
+    <p>Compiling a pipeline is <strong>expensive</strong> — often several milliseconds. And to compile it, the graphics API needs to know the <strong>render pass format</strong> (what pixel format the output image uses, whether there's depth, etc.).</p>
+
+    <p>Problem: when you call <code>ne_pipeline_create</code> at startup, you might not have a surface yet. Or the surface might get resized and change format.</p>
+
+    <p>Solution: <strong>don't compile immediately</strong>. Store the recipe. Compile on first use.</p>
+
+    <div class="diagram">
+      <svg viewBox="0 0 720 340" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="Deferred pipeline compilation">
+        <defs>
+          <marker id="arrow2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M0,0 L10,5 L0,10 z" fill="#7c5cff"/>
+          </marker>
+        </defs>
+
+        <rect x="30" y="20" width="300" height="230" rx="12" class="node-box"/>
+        <text x="180" y="50" text-anchor="middle" class="node-text">ne_pipeline_create()</text>
+        <text x="180" y="70" text-anchor="middle" class="node-sub">"Here's the recipe"</text>
+
+        <rect x="60" y="90" width="240" height="30" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="180" y="110" text-anchor="middle" class="node-sub"><tspan fill="#10b981">✓</tspan> vertex shader resolved</text>
+
+        <rect x="60" y="125" width="240" height="30" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="180" y="145" text-anchor="middle" class="node-sub"><tspan fill="#10b981">✓</tspan> vertex layout deep-copied</text>
+
+        <rect x="60" y="160" width="240" height="30" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="180" y="180" text-anchor="middle" class="node-sub"><tspan fill="#10b981">✓</tspan> pipeline layout created</text>
+
+        <rect x="60" y="195" width="240" height="45" rx="4" fill="#0f1319" stroke="#f59e0b"/>
+        <text x="180" y="215" text-anchor="middle" class="node-sub"><tspan fill="#f59e0b">⏳</tspan> VkPipeline = NULL</text>
+        <text x="180" y="232" text-anchor="middle" class="node-sub">needs_compile = true</text>
+
+        <path d="M330 135 L440 135" stroke="#7c5cff" stroke-width="2" fill="none" marker-end="url(#arrow2)"/>
+        <text x="385" y="125" text-anchor="middle" class="node-sub" fill="#7c5cff">later, during first frame</text>
+
+        <rect x="440" y="20" width="260" height="230" rx="12" class="node-box accent"/>
+        <text x="570" y="50" text-anchor="middle" class="node-text">set_pipeline() first call</text>
+        <text x="570" y="70" text-anchor="middle" class="node-sub">Render pass is now known</text>
+
+        <rect x="460" y="90" width="220" height="45" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="570" y="112" text-anchor="middle" class="node-sub" font-size="11">needs_compile ?</text>
+        <text x="570" y="128" text-anchor="middle" class="node-sub" fill="#10b981">→ compile now</text>
+
+        <rect x="460" y="145" width="220" height="45" rx="4" fill="#0f1319" stroke="#3a3f4b"/>
+        <text x="570" y="167" text-anchor="middle" class="node-sub" font-family="ui-monospace, monospace" font-size="11">vkCreateGraphicsPipelines</text>
+        <text x="570" y="182" text-anchor="middle" class="node-sub">(~1ms one-time cost)</text>
+
+        <rect x="460" y="200" width="220" height="40" rx="4" fill="#0f1319" stroke="#10b981"/>
+        <text x="570" y="220" text-anchor="middle" class="node-sub" fill="#10b981" font-size="12">✓ VkPipeline ready</text>
+        <text x="570" y="235" text-anchor="middle" class="node-sub">needs_compile = false</text>
+
+        <text x="360" y="290" text-anchor="middle" fill="#8891a3" font-size="12">Every subsequent set_pipeline() call is a single instant vkCmdBindPipeline.</text>
+        <text x="360" y="310" text-anchor="middle" fill="#8891a3" font-size="12">The 1ms compile cost is paid once, at first use.</text>
+      </svg>
+      <div class="diagram-caption">Deferred compilation trades a slightly complex first frame for a much simpler API.</div>
+    </div>
+
+    <div class="plain">
+      Think of it like a recipe you write down but don't cook until someone actually orders it. When the customer arrives, you know exactly what pan they want, so you can pick the right one — but the writing was done up front.
+    </div>
+
+    <h2>Fixed pipeline state in this engine</h2>
+
+    <p>To keep the API small, the engine hard-codes a lot of pipeline state. If you need something different, you'd need to expand <code>NEPipelineDesc</code>.</p>
+
+    <table>
+      <thead><tr><th>Setting</th><th>Value</th></tr></thead>
+      <tbody>
+        <tr><td>Cull mode</td><td><code>NONE</code> — draws both sides of triangles</td></tr>
+        <tr><td>Front face</td><td><code>COUNTER_CLOCKWISE</code></td></tr>
+        <tr><td>Polygon mode</td><td><code>FILL</code> — solid triangles, not wireframe</td></tr>
+        <tr><td>Depth / stencil</td><td>Disabled</td></tr>
+        <tr><td>MSAA</td><td>Off (1 sample)</td></tr>
+        <tr><td>Dynamic state</td><td>Viewport + scissor (can change without re-compiling)</td></tr>
+        <tr><td>Push constant range</td><td>0..128 bytes, both stages</td></tr>
+      </tbody>
+    </table>
+
+    <h2>How each backend handles pipelines</h2>
+
+    <table>
+      <thead>
+        <tr><th></th><th>Vulkan <span class="pill vulkan">Win</span></th><th>Metal <span class="pill metal">Mac</span></th><th>WebGPU <span class="pill wgpu">Web</span></th></tr>
+      </thead>
+      <tbody>
+        <tr>
+          <td><strong>Shader format accepted</strong></td>
+          <td>SPIR-V bytecode <em>or</em> GLSL (compiled at runtime by glslang)</td>
+          <td>MSL source <em>or</em> metallib blob</td>
+          <td>WGSL source only</td>
+        </tr>
+        <tr>
+          <td><strong>Deferred compile?</strong></td>
+          <td>✅ Yes — needs render pass format</td>
+          <td>❌ Eager — Metal doesn't need it</td>
+          <td>❌ Eager, but needs the surface format (chosen on first frame)</td>
+        </tr>
+        <tr>
+          <td><strong>Pipeline state object</strong></td>
+          <td><code>VkPipeline</code></td>
+          <td><code>MTLRenderPipelineState</code></td>
+          <td><code>WGPURenderPipeline</code></td>
+        </tr>
+      </tbody>
+    </table>
+
+    <div class="could-be-better">
+      <div class="cbb-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>
+        How this could be better
+      </div>
+      <ul>
+        <li><strong>Cross-compile shaders.</strong> Right now you write GLSL for Vulkan, WGSL for the web, and MSL (or nothing) for Metal — three separate copies of every shader. A single source language (Slang, or SPIRV-Cross-compiled GLSL) would collapse this.</li>
+        <li><strong>Compute pipelines are stubs on all three backends.</strong> The API declares them, but they log "not yet implemented" and return null.</li>
+        <li><strong>Pipeline cache.</strong> A compiled pipeline is fully deterministic from its inputs. Storing compiled pipelines to disk (Vulkan supports this natively via <code>VkPipelineCache</code>) would cut startup time on later runs.</li>
+        <li><strong>Pipeline libraries / dynamic state.</strong> Modern Vulkan lets you swap fragments of pipeline state (blend, topology) without a full recompile. Would remove the ~1ms hitch on any state permutation.</li>
+      </ul>
+    </div>
+
+    <div class="page-nav">
+      <a class="prev" href="buffers.html"><small>Previous</small>← Buffers &amp; memory</a>
+      <a class="next" href="swapchain.html"><small>Next</small>The swapchain →</a>
+    </div>
+  </main>
+</div>
+<script src="https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.9.0/build/highlight.min.js"></script>
+<script src="assets/site.js"></script>
+</body>
+</html>
