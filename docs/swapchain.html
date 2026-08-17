@@ -314,6 +314,21 @@ struct NESwapchain {
       </tbody>
     </table>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        How industry engines present frames
+      </div>
+      <p>The "which present path" question is genuinely contentious. NanoEngine offering both WSI and DXGI-with-DirectComposition on the same backend is <strong>unusually flexible</strong>:</p>
+      <ul>
+        <li><span class="ind-engine">Most Vulkan games on Windows</span> — use standard WSI. Simple, portable, works with any Vulkan-capable window. No transparency support.</li>
+        <li><span class="ind-engine">Microsoft's own PIX + DirectX games</span> — DXGI flip-model swapchains, sometimes with DirectComposition for overlays. Windows-only but tightly integrated with the OS compositor (variable refresh rate, HDR handshake, tearing control).</li>
+        <li><span class="ind-engine">Vulkan Vulkan-DX interop</span> (like NanoEngine's DXGI path) — historically rare. Popularized by <em>Doom Eternal</em> (which shipped a Vulkan+DXGI path for HDR) and more recently by tooling engines like <em>Blender</em> and <em>Krita</em> that want transparent Vulkan windows on Windows.</li>
+        <li><span class="ind-engine">Present-mode preference</span> — AAA games default to MAILBOX (low latency vsync) when available, fallback FIFO. Competitive shooters offer IMMEDIATE (tearing OK) for lowest input lag. NanoEngine follows the same preference order.</li>
+      </ul>
+      <p>The swapchain-as-vtable design also mirrors what real engines do: <span class="ind-engine">bgfx</span>'s "renderer interface" abstracts D3D11/D3D12/Vulkan/Metal presentation behind function tables, exactly like <code>NESwapchainOps</code>.</p>
+    </div>
+
     <div class="could-be-better">
       <div class="cbb-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>

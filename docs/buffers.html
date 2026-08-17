@@ -290,6 +290,21 @@ typedef struct NEVulkanBufferSlot {
     // ... plus an image path via a second union arm ...
 } NEVulkanBufferSlot;</code></pre>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        How industry engines handle GPU memory
+      </div>
+      <p>The "static vs dynamic" split is universal — but the implementations differ dramatically:</p>
+      <ul>
+        <li><span class="ind-engine">Unreal, Unity, Frostbite</span> — every AAA engine uses <a href="https://gpuopen.com/vulkan-memory-allocator/" target="_blank" rel="noopener">AMD's VMA library</a> or something functionally equivalent. VMA grabs a few 256 MB chunks up front and sub-allocates. NanoEngine calls <code>vkAllocateMemory</code> per resource — a huge simplification that won't survive real scenes (drivers cap you at ~4096 allocations).</li>
+        <li><span class="ind-engine">Doom Eternal (id Tech 7)</span> — famously bins buffers by size class and pre-allocates pools per class. Zero runtime allocations after startup. Very extreme, very fast.</li>
+        <li><span class="ind-engine">Unity's SRP</span> — a "transient allocator" for per-frame data (like NanoEngine's dynamic buffers), plus a permanent allocator for meshes/textures. Same conceptual split, industrial-strength implementation.</li>
+        <li><span class="ind-engine">bgfx</span> — very similar to NanoEngine: static buffers (uploaded once), dynamic buffers (per-frame). Adds a third: "transient buffers" — one-shot data valid for the frame you allocate it in. Useful for immediate-mode UI.</li>
+      </ul>
+      <p>Push constants specifically: <span class="ind-engine">most real engines</span> use them for the same thing as NanoEngine (per-draw transforms and material params). The 128-byte limit is a real ceiling everyone hits.</p>
+    </div>
+
     <div class="could-be-better">
       <div class="cbb-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>

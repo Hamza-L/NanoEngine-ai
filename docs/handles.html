@@ -242,6 +242,21 @@ struct NERenderer {
       <p>Vulkan images live in the same pool as buffers, using a union in the slot struct. This works but is a bit of an inconsistency. Also, <code>NEImageHandle</code> is a raw <code>uint64_t</code> instead of the <code>struct { uint32_t id; }</code> shape used by every other handle. See <a href="rough-edges.html">Rough edges</a>.</p>
     </div>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        How industry engines expose resources
+      </div>
+      <p>Almost every engine uses handles rather than pointers. What differs is the <em>flavor</em>:</p>
+      <ul>
+        <li><span class="ind-engine">bgfx, sokol_gfx</span> — the same pattern NanoEngine uses: <code>struct { uint16_t id; }</code> or <code>uint32_t</code>. Very lightweight, no generation tracking, opaque to the caller.</li>
+        <li><span class="ind-engine">Unreal, EA's Frostbite</span> — <strong>generational handles</strong>: the top 8-16 bits are a "version number" bumped on every free. Using an old handle after destroy is a fast, clean error instead of a silent alias to the new resource.</li>
+        <li><span class="ind-engine">DirectX 12, Vulkan themselves</span> — return opaque pointer-like types (<code>ID3D12Resource*</code>, <code>VkImage</code>). These are actually driver-side handles too, just hidden behind pointer syntax.</li>
+        <li><span class="ind-engine">Unity's C# side</span> — a <code>NativeArray</code> handle plus a "safety system" that validates every access in debug mode. Heavier but catches every use-after-free.</li>
+      </ul>
+      <p>NanoEngine sits at the simplest end of this spectrum — good for a small engine, but adding generations (as noted below) is the standard next step for production use.</p>
+    </div>
+
     <div class="could-be-better">
       <div class="cbb-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>

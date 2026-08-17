@@ -169,6 +169,20 @@
       </div>
     </div>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        Where NanoEngine fits in the landscape
+      </div>
+      <p>To set expectations: NanoEngine is a <strong>small learning engine</strong>, not a production framework. It sits alongside projects like <span class="ind-engine">bgfx</span>, <span class="ind-engine">sokol_gfx</span>, and <span class="ind-engine">Vulkan-Samples</span> — small enough to read cover-to-cover, big enough to actually draw things.</p>
+      <ul>
+        <li><span class="ind-engine">Unreal, Unity, Godot</span> — full game engines with scene graphs, editors, asset pipelines, physics, audio. NanoEngine intentionally has none of that. It's the layer <em>underneath</em> that stuff.</li>
+        <li><span class="ind-engine">bgfx, sokol_gfx, The-Forge</span> — the closest cousins. Cross-platform rendering abstractions with the same "one API over multiple backends" shape.</li>
+        <li><span class="ind-engine">Vulkan/Metal/WebGPU directly</span> — those are the platform APIs NanoEngine wraps. It exists to hide their differences so your app code doesn't need three copies of everything.</li>
+      </ul>
+      <p>Every concept page has a <span class="ind-engine" style="border-left: 2px solid #818cf8; padding-left: .4rem;">"How industry engines do this"</span> box comparing NanoEngine's approach to what the big players ship. Because this project's job is <em>teaching the pattern</em>, not competing with them.</p>
+    </div>
+
     <h2>How the code is organized</h2>
 
     <p>The full project tree is about 30 files. The important shape:</p>

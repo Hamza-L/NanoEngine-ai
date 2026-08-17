@@ -329,6 +329,27 @@ NEShaderHandle vs = ne_shader_create_from_source(renderer, &amp;(NEShaderSourceD
       </tbody>
     </table>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        How industry engines handle shaders &amp; pipelines
+      </div>
+      <p><strong>Pipeline compilation stalls</strong> are one of the most notorious PC gaming problems. What the big engines do:</p>
+      <ul>
+        <li><span class="ind-engine">Unreal 5</span> — a <em>PSO (pipeline state object) cache</em>: on your first playthrough it compiles and streams the compiled blobs to disk. Later runs load pre-baked pipelines. Games ship with a "PSO precache" step for this reason.</li>
+        <li><span class="ind-engine">Unity URP</span> — "shader variant collections" — you pre-declare every pipeline combination you'll use and Unity compiles them ahead of time. Trades memory for smooth frames.</li>
+        <li><span class="ind-engine">Modern Vulkan (1.3+)</span> — <em>graphics pipeline libraries</em>: compile shaders once, mix and match them into full pipelines cheaply. Removes the "recompile everything if blend state changes" cost.</li>
+        <li><span class="ind-engine">DirectX 12 with Agility SDK</span> — supports "state objects" that separate common state from draw-specific state. Same idea as pipeline libraries.</li>
+      </ul>
+      <p><strong>Shader languages</strong> in industry:</p>
+      <ul>
+        <li><span class="ind-engine">Unreal</span> writes HLSL, cross-compiles to SPIR-V/MSL/DXIL via its own translator.</li>
+        <li><span class="ind-engine">Godot 4</span> writes GLSL, transpiles via <a href="https://github.com/KhronosGroup/glslang" target="_blank" rel="noopener">glslang</a> (same lib NanoEngine uses) + <a href="https://github.com/KhronosGroup/SPIRV-Cross" target="_blank" rel="noopener">SPIRV-Cross</a> for MSL/HLSL output.</li>
+        <li><span class="ind-engine">Modern engines (2024+)</span> increasingly adopt <a href="https://github.com/shader-slang/slang" target="_blank" rel="noopener">Slang</a> — one HLSL-like language that compiles to every target.</li>
+      </ul>
+      <p>NanoEngine's deferred-compile model is actually <em>similar</em> to what Unreal does with PSO caching, minus the disk persistence. The direction is right; the polish isn't there yet.</p>
+    </div>
+
     <div class="could-be-better">
       <div class="cbb-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>

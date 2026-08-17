@@ -290,6 +290,21 @@ uint32_t        frame_index;              // wraps 0, 1, 0, 1, ...</code></pre>
 
     <p>On Windows there's an extra twist: while the user is <em>actively</em> dragging the edge, the OS blocks the main loop. The engine works around this by hooking <code>WM_SIZE</code> and calling the render callback <em>inline</em> — so the window keeps updating during the drag.</p>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        How industry engines drive frames
+      </div>
+      <p>Two frames in flight is the <strong>default across the whole industry</strong>. Some notable specifics:</p>
+      <ul>
+        <li><span class="ind-engine">Unreal Engine 5</span> — 2 frames on desktop, 3 on mobile (to hide higher latency variance). Uses a dedicated "RHI thread" that records commands in parallel with the game thread.</li>
+        <li><span class="ind-engine">Unity (URP/HDRP)</span> — 2 frames. Uses a "render graph" that plans the whole frame's passes ahead of time, then submits.</li>
+        <li><span class="ind-engine">id Tech 7 (Doom Eternal)</span> — 2 frames, but with an <em>async compute</em> queue running lighting/particles in parallel. Same fence pattern NanoEngine uses, applied twice.</li>
+        <li><span class="ind-engine">DXR / RTX games</span> — sometimes 3 to hide ray-tracing latency spikes.</li>
+      </ul>
+      <p>NanoEngine's swimlane (CPU records N+1 while GPU draws N) is the fundamental pattern. What the big engines add on top: multithreaded command recording, async compute, and predictive frame pacing to avoid missed vsyncs.</p>
+    </div>
+
     <div class="could-be-better">
       <div class="cbb-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>

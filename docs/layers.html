@@ -270,6 +270,19 @@ ne_app_destroy(app);</code></pre>
       <li><span class="pill web">Web</span> — when <code>requestAnimationFrame</code> fires (push model)</li>
     </ul>
 
+    <div class="industry">
+      <div class="ind-title">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M2 3h6l2 4H2zM14 3h8v6h-8zM2 13h8v8H2zM14 13h8l-2 8h-6z"/></svg>
+        How industry engines organize this
+      </div>
+      <p>Most production engines use one of two shapes — NanoEngine is closest to the first but simplified:</p>
+      <ul>
+        <li><span class="ind-engine">Unreal, Unity, Godot</span> — a big <em>scene graph</em>. You add "actors" or "nodes" to the world; the engine walks the tree each frame, culls what's off-screen, sorts by material, and issues draws for you. Very high-level, no manual draw calls.</li>
+        <li><span class="ind-engine">bgfx, sokol_gfx, WebGPU-native samples</span> — a <em>command-recorder</em> API like NanoEngine's, but the frame callback is more open-ended: you call <code>set_pipeline / bind / draw</code> as many times as you want. NanoEngine's <code>NEFrameContext</code> currently hard-codes a single draw, which is a stepping stone toward the same shape.</li>
+      </ul>
+      <p>The four-layer split (<span class="ind-engine">App → Window → Renderer → Surface</span>) mirrors what GLFW+bgfx or SDL+sokol_gfx look like — a common "small engine" pattern.</p>
+    </div>
+
     <div class="could-be-better">
       <div class="cbb-title">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2v6M12 18v4M4.93 4.93l4.24 4.24M14.83 14.83l4.24 4.24M2 12h6M18 12h4"/></svg>

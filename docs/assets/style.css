@@ -231,6 +231,38 @@ ul li, ol li { color: var(--text-dim); margin: .3rem 0; }
   margin-right: .3rem;
 }
 
+/* Industry comparison — how the big engines do it */
+.industry {
+  border: 1px solid rgba(129, 140, 248, 0.28);
+  background: linear-gradient(180deg, rgba(129, 140, 248, 0.07), rgba(129, 140, 248, 0.02));
+  border-radius: var(--radius);
+  padding: 1rem 1.2rem;
+  margin: 1.4rem 0;
+  border-left: 3px solid #818cf8;
+}
+.industry .ind-title {
+  display: flex;
+  align-items: center;
+  gap: .5rem;
+  font-weight: 700;
+  color: #a5b4fc;
+  font-size: .78rem;
+  text-transform: uppercase;
+  letter-spacing: .1em;
+  margin-bottom: .5rem;
+}
+.industry .ind-title svg { width: 14px; height: 14px; flex-shrink: 0; }
+.industry p { margin: .3rem 0; }
+.industry p:last-child { margin-bottom: 0; }
+.industry ul { margin: .3rem 0 .3rem 1.1rem; padding: 0; color: var(--text-dim); }
+.industry li { margin: .25rem 0; }
+.industry .ind-engine {
+  color: #c7d2fe;
+  font-weight: 600;
+  font-size: .82em;
+  letter-spacing: .01em;
+}
+
 .card-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(min(240px, 100%), 1fr));
