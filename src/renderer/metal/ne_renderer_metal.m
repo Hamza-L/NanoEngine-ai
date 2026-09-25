@@ -456,8 +456,11 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *renderer, NERenderSurface *sur
         return NULL;
     }
 
-    /* Block until a frame slot is available (at most NE_MTL_MAX_FRAMES_IN_FLIGHT in flight). */
-    dispatch_semaphore_wait(surface->frame_semaphore, DISPATCH_TIME_FOREVER);
+    /* The display callback also services UI work. Skip this drawing opportunity
+     * if the GPU still owns every frame slot; do not block the main thread. */
+    if (dispatch_semaphore_wait(surface->frame_semaphore, DISPATCH_TIME_NOW) != 0) {
+        return NULL;
+    }
 
     /*
      * From here on, every failure path must release the frame slot we just
