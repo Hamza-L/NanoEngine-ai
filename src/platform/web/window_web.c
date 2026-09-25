@@ -99,7 +99,12 @@ void ne_app_destroy(NEApp *app) {
     }
 
     app->running = false;
+    emscripten_cancel_main_loop();
     app->initialized = false;
+    /* Detach event callbacks and their user pointers before freeing the app. */
+    while (app->windows) {
+        ne_window_destroy(app->windows);
+    }
     app->window_count = 0;
 
     free(app);
@@ -129,14 +134,28 @@ bool ne_app_poll_events(NEApp *app) {
  */
 static void ne_web_frame_tick(void *user) {
     NEApp *app = (NEApp *)user;
-    if (!app) {
+    if (!app || app != g_app_state.app || !app->running) {
         return;
     }
-    for (NEWindow *w = app->windows; w; w = w->next) {
+    /* Retain the app while user code runs. A callback may destroy its window
+     * or release the application's last external reference. */
+    g_app_state.refcount++;
+    for (NEWindow *w = app->windows; w;) {
+        NEWindow *next = w->next;
         if (w->open && w->render_frame) {
             w->render_frame(w->render_frame_user);
         }
+        if (!app->running || g_app_state.refcount == 1) {
+            break;
+        }
+        /* Do not dereference a next window that the callback also destroyed. */
+        NEWindow *registered = app->windows;
+        while (registered && registered != next) {
+            registered = registered->next;
+        }
+        w = registered;
     }
+    ne_app_destroy(app); /* release the temporary callback reference */
 }
 
 void ne_app_run(NEApp *app) {
@@ -160,7 +179,7 @@ void ne_app_request_quit(NEApp *app) {
         return;
     }
     app->running = false;
-    /* TODO(web): emscripten_cancel_main_loop() to actually stop the rAF loop. */
+    emscripten_cancel_main_loop();
 }
 
 bool ne_app_is_running(const NEApp *app) {
