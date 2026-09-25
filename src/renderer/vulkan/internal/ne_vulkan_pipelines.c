@@ -4,6 +4,7 @@
 
 #include "ne_renderer_pipeline.h"
 #include "ne_log.h"
+#include <string.h>
 
 extern PFN_vkCreateGraphicsPipelines vkCreateGraphicsPipelines;
 extern PFN_vkResetFences vkResetFences;
@@ -373,24 +374,8 @@ NEPipelineHandle ne_pipeline_create(NERenderer *renderer, const NEPipelineDesc *
 
 /* ── ne_pipeline_destroy ─────────────────────────────────────────────────── */
 
-void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
-    if (!renderer || !ne_pipeline_handle_valid(handle)) {
-        return;
-    }
-
-    const uint32_t index = handle.id - 1;
-    if (index >= renderer->pipelines.cap || !((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index].occupied) {
-        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)", handle.id);
-        return;
-    }
-
-    NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index];
-
-    /* Ensure the GPU is done with any command buffers referencing this pipeline. */
-    if (renderer->device != VK_NULL_HANDLE) {
-        (void)vkDeviceWaitIdle(renderer->device);
-    }
-
+static void ne_vk_release_pipeline(NERenderer *renderer, void *data) {
+    NEVulkanPipelineSlot *slot = data;
     if (slot->pipeline != VK_NULL_HANDLE) {
         vkDestroyPipeline(renderer->device, slot->pipeline, NULL);
         slot->pipeline = VK_NULL_HANDLE;
@@ -403,6 +388,7 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
 
     free(slot->vert_entry);
     free(slot->frag_entry);
+    free(slot->compute_entry);
     free(slot->bindings);
     free(slot->attributes);
 
@@ -413,7 +399,23 @@ void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
     slot->vert_module  = VK_NULL_HANDLE;
     slot->frag_module  = VK_NULL_HANDLE;
 
-    ne_pool_free(&renderer->pipelines, index, sizeof(NEVulkanPipelineSlot));
+}
+
+void ne_pipeline_destroy(NERenderer *renderer, NEPipelineHandle handle) {
+    if (!renderer || !ne_pipeline_handle_valid(handle)) {
+        return;
+    }
+    const uint32_t index = handle.id - 1;
+    if (index >= renderer->pipelines.cap || !((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index].occupied) {
+        NE_LOG_WARN("ne_pipeline_destroy: invalid or already-destroyed pipeline handle (id=%u)", handle.id);
+        return;
+    }
+    NEVulkanPipelineSlot *slot = &((NEVulkanPipelineSlot*)renderer->pipelines.slots)[index];
+    if (!ne_vk_retire(renderer, ne_vk_release_pipeline, slot, sizeof(*slot))) {
+        return;
+    }
+    ne_pool_free(&renderer->pipelines, index, sizeof(*slot));
+    memset(slot, 0, sizeof(*slot));
 }
 
 /* ── Compute pipeline stubs ──────────────────────────────────────────────── */
@@ -497,8 +499,7 @@ NEComputePipelineHandle ne_compute_pipeline_create(NERenderer *renderer, const N
 }
 
 void ne_compute_pipeline_destroy(NERenderer *renderer, NEComputePipelineHandle handle) {
-    (void)renderer;
-    (void)handle;
+    ne_pipeline_destroy(renderer, (NEPipelineHandle){.id = handle.id});
 }
 
 void ne_pipeline_destroy_all(NERenderer *r) {
@@ -506,16 +507,7 @@ void ne_pipeline_destroy_all(NERenderer *r) {
     for (uint32_t i = 0; i < r->pipelines.cap; i++) {
         NEVulkanPipelineSlot *pslot = &((NEVulkanPipelineSlot*)r->pipelines.slots)[i];
         if (pslot->occupied) {
-            if (pslot->pipeline != VK_NULL_HANDLE) {
-                vkDestroyPipeline(r->device, pslot->pipeline, NULL);
-            }
-            if (pslot->layout != VK_NULL_HANDLE) {
-                vkDestroyPipelineLayout(r->device, pslot->layout, NULL);
-            }
-            free(pslot->vert_entry);
-            free(pslot->frag_entry);
-            free(pslot->bindings);
-            free(pslot->attributes);
+            ne_vk_release_pipeline(r, pslot);
         }
     }
     ne_pool_destroy(&r->pipelines);

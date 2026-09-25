@@ -42,7 +42,17 @@ struct NERenderer {
     NEShaderOptimization shader_optimization; /* default: NE_SHADER_OPTIMIZATION_NONE (0) */
 
     struct NERenderSurface *surfaces;
+    struct NEVulkanRetired *retired_pending;
+    struct NEVulkanRetiredBatch *retired_batches;
 };
+
+/* Snapshot a resource for destruction after all current recording/submitted
+ * work finishes. On allocation failure the caller must retain ownership. */
+bool ne_vk_retire(NERenderer *r, void (*destroy)(NERenderer *, void *),
+                  const void *data, size_t size);
+bool ne_vk_has_active_frames(const NERenderer *r);
+/* force is only legal after GPU idle and discarding all recorded commands. */
+void ne_vk_collect_retired(NERenderer *r, bool force);
 
 uint32_t ne_vk_find_memory_type(NERenderer *r, uint32_t type_filter, VkMemoryPropertyFlags properties);
 

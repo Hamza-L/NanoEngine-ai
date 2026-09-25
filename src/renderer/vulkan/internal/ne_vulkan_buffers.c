@@ -5,6 +5,7 @@
 
 #include "ne_alloc.h"
 #include "ne_log.h"
+#include <string.h>
 
 extern PFN_vkDestroyImage vkDestroyImage;
 extern PFN_vkDestroyImageView vkDestroyImageView;
@@ -55,13 +56,13 @@ void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot) {
     /* Image slots alias `buffer` with `image` in the union; free them as images
      * (this also releases the imageView, which the buffer path would leak). */
     if (slot->usage & (NE_BUFFER_USAGE_IMAGE_STORAGE | NE_BUFFER_USAGE_IMAGE_SAMPLED)) {
-        if (slot->image != VK_NULL_HANDLE) {
-            vkDestroyImage(r->device, slot->image, NULL);
-            slot->image = VK_NULL_HANDLE;
-        }
         if (slot->imageView != VK_NULL_HANDLE) {
             vkDestroyImageView(r->device, slot->imageView, NULL);
             slot->imageView = VK_NULL_HANDLE;
+        }
+        if (slot->image != VK_NULL_HANDLE) {
+            vkDestroyImage(r->device, slot->image, NULL);
+            slot->image = VK_NULL_HANDLE;
         }
         if (slot->memory != VK_NULL_HANDLE) {
             vkFreeMemory(r->device, slot->memory, NULL);
@@ -551,6 +552,19 @@ void ne_buffer_update(NERenderer *renderer, NEBufferHandle handle,
     }
 }
 
+static void ne_vk_release_buffer(NERenderer *r, void *data) {
+    ne_vk_buffer_slot_free(r, data);
+}
+
+void ne_vk_buffer_slot_retire(NERenderer *r, uint32_t index) {
+    NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot *)r->buffers.slots)[index];
+    if (!ne_vk_retire(r, ne_vk_release_buffer, slot, sizeof(*slot))) {
+        return;
+    }
+    ne_pool_free(&r->buffers, index, sizeof(*slot));
+    memset(slot, 0, sizeof(*slot));
+}
+
 void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
     if (!renderer || !ne_buffer_handle_valid(handle)) {
         return;
@@ -568,9 +582,7 @@ void ne_buffer_destroy(NERenderer *renderer, NEBufferHandle handle) {
         return;
     }
 
-    ne_vk_buffer_slot_free(renderer, slot);
-
-    ne_pool_free(&renderer->buffers, slot_index, sizeof(NEVulkanBufferSlot));
+    ne_vk_buffer_slot_retire(renderer, slot_index);
 }
 
 void ne_buffer_destroy_all(NERenderer *r) {

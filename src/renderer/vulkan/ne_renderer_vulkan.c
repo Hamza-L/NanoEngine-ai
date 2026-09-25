@@ -68,6 +68,13 @@ struct NERenderSurface {
     NERenderPass pass;
 };
 
+bool ne_vk_has_active_frames(const NERenderer *r) {
+    for (const NERenderSurface *s = r->surfaces; s; s = s->next) {
+        if (s->pass.cmd) return true;
+    }
+    return false;
+}
+
 static bool ne_vk_pick_device_and_queue(NERenderer *r, VkSurfaceKHR surface) {
     if (r->phys != VK_NULL_HANDLE && r->device != VK_NULL_HANDLE) {
         return true;
@@ -672,6 +679,7 @@ void ne_renderer_destroy(NERenderer *r) {
     }
     r->surfaces = NULL;
 
+    ne_vk_collect_retired(r, true);
     ne_buffer_destroy_all(r); //also destroys all images
     ne_shader_destroy_all(r);
     ne_pipeline_destroy_all(r);
@@ -856,6 +864,10 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
     if (!r || !surface || surface->renderer != r) {
         return NULL;
     }
+    if (surface->pass.cmd) {
+        return NULL;
+    }
+    ne_vk_collect_retired(r, false);
 
     if (!surface->window || !ne_window_is_open(surface->window)) {
         return NULL;
@@ -1033,6 +1045,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
     vr = vkQueueSubmit(r->queue, 1, &si, surface->fences_in_flight[frame_index]);
     if (vr != VK_SUCCESS) {
         NE_LOG_ERROR("vkQueueSubmit failed (vr=%d)", (int)vr);
+        *pass = (NERenderPass){0};
         sc->needs_recreate = true;
         return;
     }
@@ -1048,6 +1061,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
     surface->frame_index = (surface->frame_index + 1u) % NE_VK_MAX_FRAMES_IN_FLIGHT;
 
     *pass = (NERenderPass){0};
+    ne_vk_collect_retired(r, false);
 }
 
 /* ========================================================================

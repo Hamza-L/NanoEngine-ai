@@ -43,6 +43,7 @@ bool ne_vk_ensure_staging_buffer(NERenderer *r, uint32_t required_size);
 VkBuffer ne_vk_buffer_for_frame(const NEVulkanBufferSlot *slot, uint32_t frame_index);
 
 void ne_vk_buffer_slot_free(NERenderer *r, NEVulkanBufferSlot *slot);
+void ne_vk_buffer_slot_retire(NERenderer *r, uint32_t index);
 
 void ne_buffer_destroy_all(NERenderer *renderer);
 

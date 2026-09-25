@@ -86,6 +86,18 @@ EXTRA_OBJECT_DEPS += $(VULKAN_HEADERS_MARKER)
 CFLAGS += -I$(VULKAN_HEADERS_INCLUDE_DIR)
 
 # --- Dependencies: glslang (runtime GLSL -> SPIR-V compilation) -----------
+
+# Tests real retirement bookkeeping with mocked Vulkan completion, no GPU needed.
+VULKAN_RETIREMENT_TEST_OBJS = $(BUILD_DIR)/src/test/test_vulkan_retirement.$(OBJ_EXT) \
+    $(BUILD_DIR)/src/renderer/vulkan/internal/ne_vulkan_renderer.$(OBJ_EXT) \
+    $(BUILD_DIR)/src/ne_log.$(OBJ_EXT)
+.PHONY: test-vulkan-retirement
+test-vulkan-retirement: $(BUILD_DIR)/test-vulkan-retirement.exe
+	"$(BUILD_DIR)/test-vulkan-retirement.exe"
+$(BUILD_DIR)/test-vulkan-retirement.exe: $(VULKAN_RETIREMENT_TEST_OBJS)
+	$(Q)$(LD) $(VULKAN_RETIREMENT_TEST_OBJS) -o "$@" $(LDFLAGS) $(LDLIBS)
+-include $(VULKAN_RETIREMENT_TEST_OBJS:.$(OBJ_EXT)=.d)
+
 GLSLANG_VERSION ?= 16.5.0
 GLSLANG_DIR := external/glslang
 GLSLANG_INCLUDE_DIR := $(GLSLANG_DIR)/include/glslang/Include

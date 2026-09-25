@@ -326,6 +326,5 @@ void ne_image_destroy(NERenderer *renderer, NEImageHandle handle) {
         return;
     }
 
-    ne_vk_buffer_slot_free(renderer, slot);
-    ne_pool_free(&renderer->buffers, slot_index, sizeof(NEVulkanBufferSlot));
+    ne_vk_buffer_slot_retire(renderer, slot_index);
 }

@@ -2,12 +2,101 @@
 #include "internal/ne_vulkan_buffers.h"
 
 #include "ne_log.h"
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
 
 extern PFN_vkEndCommandBuffer vkEndCommandBuffer;
 extern PFN_vkResetFences vkResetFences;
 extern PFN_vkQueueSubmit vkQueueSubmit;
 extern PFN_vkWaitForFences vkWaitForFences;
 extern PFN_vkCmdPipelineBarrier vkCmdPipelineBarrier;
+extern PFN_vkCreateFence vkCreateFence;
+extern PFN_vkDestroyFence vkDestroyFence;
+
+typedef struct NEVulkanRetired {
+    struct NEVulkanRetired *next;
+    void (*destroy)(NERenderer *, void *);
+    max_align_t data[];
+} NEVulkanRetired;
+
+typedef struct NEVulkanRetiredBatch {
+    struct NEVulkanRetiredBatch *next;
+    VkFence fence;
+    NEVulkanRetired *items;
+} NEVulkanRetiredBatch;
+
+bool ne_vk_retire(NERenderer *r, void (*destroy)(NERenderer *, void *),
+                  const void *data, size_t size) {
+    if (size > SIZE_MAX - sizeof(NEVulkanRetired)) {
+        return false;
+    }
+    NEVulkanRetired *item = malloc(sizeof(*item) + size);
+    if (!item) {
+        NE_LOG_ERROR("resource retirement allocation failed; resource remains live");
+        return false;
+    }
+    item->destroy = destroy;
+    memcpy(item->data, data, size);
+    item->next = r->retired_pending;
+    r->retired_pending = item;
+    return true;
+}
+
+static void ne_vk_release_retired(NERenderer *r, NEVulkanRetired *item) {
+    while (item) {
+        NEVulkanRetired *next = item->next;
+        item->destroy(r, item->data);
+        free(item);
+        item = next;
+    }
+}
+
+void ne_vk_collect_retired(NERenderer *r, bool force) {
+    NEVulkanRetiredBatch **link = &r->retired_batches;
+    while (*link) {
+        NEVulkanRetiredBatch *batch = *link;
+        if (!force && vkWaitForFences(r->device, 1, &batch->fence, VK_TRUE, 0) != VK_SUCCESS) {
+            link = &batch->next;
+            continue;
+        }
+        *link = batch->next;
+        ne_vk_release_retired(r, batch->items);
+        vkDestroyFence(r->device, batch->fence, NULL);
+        free(batch);
+    }
+    if (force) {
+        ne_vk_release_retired(r, r->retired_pending);
+        r->retired_pending = NULL;
+        return;
+    }
+    if (!r->retired_pending || ne_vk_has_active_frames(r)) {
+        return;
+    }
+
+    /* One completion marker for the batch. It follows every prior submission
+     * on our single queue. Do not insert it while a frame is still recording:
+     * that frame may already contain references to the retired resources. */
+    NEVulkanRetiredBatch *batch = calloc(1, sizeof(*batch));
+    if (!batch) {
+        return; /* retain pending resources and retry at the next boundary */
+    }
+    VkFenceCreateInfo info = {.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+    VkResult result = vkCreateFence(r->device, &info, NULL, &batch->fence);
+    if (result == VK_SUCCESS) {
+        result = vkQueueSubmit(r->queue, 0, NULL, batch->fence);
+    }
+    if (result != VK_SUCCESS) {
+        if (batch->fence) vkDestroyFence(r->device, batch->fence, NULL);
+        free(batch);
+        NE_LOG_ERROR("could not submit resource retirement fence (vr=%d)", (int)result);
+        return;
+    }
+    batch->items = r->retired_pending;
+    r->retired_pending = NULL;
+    batch->next = r->retired_batches;
+    r->retired_batches = batch;
+}
 
 bool ne_vk_submit_transfer_cmd(NERenderer *r, VkCommandBuffer cmd) {
     if (!r || !r->transfer_cmd || cmd == VK_NULL_HANDLE) {
