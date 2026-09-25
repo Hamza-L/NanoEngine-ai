@@ -899,7 +899,7 @@ NERenderPass *ne_renderer_begin_frame(NERenderer *r, NERenderSurface *surface) {
      *
      * This tracking only applies to the Vulkan WSI path (where multiple flight
      * frames may target different swapchain images). The DXGI path uses
-     * vkDeviceWaitIdle at present time, so this is unnecessary.
+     * a wait for the current frame's fence at present time, so this is unnecessary.
      */
     if (surface->present_backend != NE_PRESENT_BACKEND_DXGI) {
         VkFence *images_in_flight = ne_swapchain_vulkan_wsi_get_images_in_flight(sc);
@@ -1017,7 +1017,7 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
     if (surface->present_backend == NE_PRESENT_BACKEND_DXGI) {
         /*
          * DXGI path: no GPU semaphore from acquire (DXGI doesn't produce one),
-         * and no signal semaphore needed (present uses vkDeviceWaitIdle).
+         * and no signal semaphore needed (present waits for this frame's fence).
          * We still use the flight fence for frame pacing.
          */
     } else {
@@ -1037,7 +1037,8 @@ void ne_renderer_end_frame(NERenderer *r, NERenderSurface *surface) {
         return;
     }
 
-    NESwapchainPresentResult pres = sc->ops->present(sc, r->queue, render_finished_sem);
+    NESwapchainPresentResult pres = sc->ops->present(sc, r->queue, render_finished_sem,
+                                                    surface->fences_in_flight[frame_index]);
     if (pres != NE_SWAPCHAIN_PRESENT_SUCCESS) {
         /* needs_recreate is set inside the present call on OUT_OF_DATE. */
     }

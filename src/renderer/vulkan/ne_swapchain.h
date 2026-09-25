@@ -79,13 +79,14 @@ typedef struct NESwapchainOps {
      *
      * queue:    the graphics/present queue
      * wait_sem: semaphore signaled by the render submit (rendering is done)
+     * render_fence: completion of this frame, for CPU-mediated DXGI presentation
      *
      * The implementation presents sc->acquired_image_index.
      *
      * Returns OUT_OF_DATE if the swapchain needs recreation.
      * Returns FAILED on unrecoverable error.
      */
-    NESwapchainPresentResult (*present)(NESwapchain *sc, VkQueue queue, VkSemaphore wait_sem);
+    NESwapchainPresentResult (*present)(NESwapchain *sc, VkQueue queue, VkSemaphore wait_sem, VkFence render_fence);
 } NESwapchainOps;
 
 /*

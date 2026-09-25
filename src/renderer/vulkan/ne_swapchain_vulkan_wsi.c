@@ -363,7 +363,8 @@ static NESwapchainAcquireResult ne_swapchain_wsi_acquire(NESwapchain *iface, VkS
     return NE_SWAPCHAIN_ACQUIRE_SUCCESS;
 }
 
-static NESwapchainPresentResult ne_swapchain_wsi_present(NESwapchain *iface, VkQueue queue, VkSemaphore wait_sem) {
+static NESwapchainPresentResult ne_swapchain_wsi_present(NESwapchain *iface, VkQueue queue, VkSemaphore wait_sem, VkFence render_fence) {
+    (void)render_fence;
     NESwapchainVulkanWSI *sc = (NESwapchainVulkanWSI *)iface;
 
     uint32_t image_index = iface->acquired_image_index;

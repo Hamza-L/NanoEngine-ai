@@ -245,7 +245,7 @@ int main(void) {
                                                           &(NERenderSurfaceDesc){
                                                           .vsync = true,
                                                           .clear_color_rgba = {0.0f, 0.0f, 0.0f, 0.0f},
-                                                          .present_backend = NE_PRESENT_BACKEND_DXGI});
+                                                          .present_backend = NE_PRESENT_BACKEND_DEFAULT});
     if (!surface) {
         ne_renderer_destroy(renderer);
         ne_window_destroy(window);

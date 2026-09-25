@@ -685,21 +685,17 @@ static NESwapchainAcquireResult ne_swapchain_dxgi_acquire(NESwapchain *iface, Vk
     return NE_SWAPCHAIN_ACQUIRE_SUCCESS;
 }
 
-static NESwapchainPresentResult ne_swapchain_dxgi_present(NESwapchain *iface, VkQueue queue, VkSemaphore wait_sem) {
+static NESwapchainPresentResult ne_swapchain_dxgi_present(NESwapchain *iface, VkQueue queue, VkSemaphore wait_sem, VkFence render_fence) {
     NESwapchainDXGI *sc = (NESwapchainDXGI *)iface;
     (void)queue;
     (void)wait_sem;
 
-    /*
-     * Option A sync: wait for Vulkan rendering to complete on CPU before
-     * calling DXGI Present. The renderer submits with fences_in_flight[frame],
-     * and begin_frame waits on it. But that's for the NEXT use of that frame
-     * slot — we need the CURRENT frame to be done NOW.
-     *
-     * The simplest correct approach: vkDeviceWaitIdle. This is a sledgehammer
-     * but it's correct and simple. We can refine to per-frame fence later.
-     */
-    vkDeviceWaitIdle(sc->device);
+    /* The CPU-mediated copy needs this frame to finish, not the entire device.
+     * Standard Vulkan WSI avoids this CPU wait and is the default demo path. */
+    if (render_fence == VK_NULL_HANDLE ||
+        vkWaitForFences(sc->device, 1, &render_fence, VK_TRUE, UINT64_MAX) != VK_SUCCESS) {
+        return NE_SWAPCHAIN_PRESENT_FAILED;
+    }
 
     /* Acquire keyed mutex on the shared texture, copy to swapchain, then release */
     uint32_t image_index = iface->acquired_image_index;
