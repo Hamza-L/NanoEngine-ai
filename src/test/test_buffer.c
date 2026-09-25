@@ -203,10 +203,11 @@ static bool test_buffer_usage_flags(NERenderer *renderer) {
  * Returns true if all tests pass, false otherwise.
  */
 bool test_buffer(NEApp *app, NEWindow *window) {
+    (void)app;
     NE_LOG_INFO("========== BUFFER TEST SUITE ==========");
 
     /* Create renderer */
-    NERenderer *renderer = ne_renderer_create(app, &(NERendererDesc){.enable_validation = true});
+    NERenderer *renderer = ne_renderer_create(&(NERendererDesc){.enable_validation = true});
     if (!renderer) {
         NE_LOG_ERROR("failed to create renderer");
         return false;

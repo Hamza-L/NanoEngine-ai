@@ -208,8 +208,7 @@ static void ne_wgpu_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adap
     wgpuAdapterRequestDevice(adapter, &device_desc, cb);
 }
 
-NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
-    (void)app;
+NERenderer *ne_renderer_create(const NERendererDesc *desc) {
     (void)desc;
 
     NERenderer *renderer = (NERenderer *)calloc(1, sizeof(NERenderer));

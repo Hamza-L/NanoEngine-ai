@@ -222,9 +222,7 @@ static id<MTLCommandQueue> ne_renderer_get_queue(const NERenderer *renderer) {
     return renderer && renderer->queue ? (__bridge id<MTLCommandQueue>)renderer->queue : nil;
 }
 
-NERenderer *ne_renderer_create(NEApp *app, const NERendererDesc *desc) {
-    (void)app;
-
+NERenderer *ne_renderer_create(const NERendererDesc *desc) {
     /*
      * enable_validation is a no-op for the Metal backend.
      * Metal's GPU validation is controlled via Xcode scheme settings or the
