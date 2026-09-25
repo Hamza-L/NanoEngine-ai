@@ -2,6 +2,7 @@
 #include "internal/ne_vulkan_buffers.h"
 
 #include "ne_log.h"
+#include "ne_renderer_buffer.h"
 #include <stddef.h>
 #include <stdlib.h>
 #include <string.h>
@@ -152,13 +153,16 @@ uint32_t ne_vk_find_memory_type(NERenderer *r, uint32_t type_filter, VkMemoryPro
 }
 
 void ne_cmd_transition_image_layout(const NERenderer *renderer, const VkCommandBuffer cmd, const NEImageHandle handle, const VkImageLayout oldLayout, const VkImageLayout newLayout) {
-    if (!ne_image_handle_valid(handle)) {
+    if (!renderer || !ne_image_handle_valid(handle) || handle - 1 >= renderer->buffers.cap) {
         NE_LOG_ERROR("ne_cmd_transition_image_layout: INVALID IMAGE HANDLE/n");
         return;
     }
 
     uint32_t slot_index = handle - 1; /* Convert handle to index */
     NEVulkanBufferSlot *slot = &((NEVulkanBufferSlot*)renderer->buffers.slots)[slot_index];
+    if (!slot->occupied || !(slot->usage & (NE_BUFFER_USAGE_IMAGE_STORAGE | NE_BUFFER_USAGE_IMAGE_SAMPLED))) {
+        return;
+    }
 
     VkImageMemoryBarrier barrier;
     memset(&barrier, 0, sizeof(barrier));
@@ -188,7 +192,19 @@ void ne_cmd_transition_image_layout(const NERenderer *renderer, const VkCommandB
         barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
 
         sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
-        destinationStage = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    } else if (oldLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL && newLayout == VK_IMAGE_LAYOUT_GENERAL) {
+        barrier.srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_SHADER_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
+        destinationStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+    } else if ((oldLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL || oldLayout == VK_IMAGE_LAYOUT_GENERAL) &&
+               newLayout == VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL) {
+        barrier.srcAccessMask = VK_ACCESS_SHADER_READ_BIT;
+        if (oldLayout == VK_IMAGE_LAYOUT_GENERAL) barrier.srcAccessMask |= VK_ACCESS_SHADER_WRITE_BIT;
+        barrier.dstAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        sourceStage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+        destinationStage = VK_PIPELINE_STAGE_TRANSFER_BIT;
     } else {
         NE_LOG_ERROR("UNSUPPORTED LAYOUT TRANSITION\n");
         return;

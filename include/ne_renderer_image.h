@@ -28,8 +28,8 @@ typedef enum NEImageFormat{
 
 typedef struct NEImageDesc {
     /* info */
-    float width;
-    float height;
+    uint32_t width;
+    uint32_t height;
     NEImageFormat format;
 
     /** Bitwise OR of `NEBufferUsage` values. */
@@ -37,10 +37,13 @@ typedef struct NEImageDesc {
 
     /**
      * Optional initial data to upload.
-     * If non-NULL, `size` bytes are copied from this pointer.
-     * If NULL, the buffer contents are undefined.
+     * If non-NULL, width * height * format tightly packed bytes are copied.
+     * If NULL, upload pixels before sampling the image.
      */
     const void *initial_data;
+    /** Interpret sampled color as sRGB. Leave false for linear numeric data.
+     * sRGB storage images are unsupported. */
+    bool srgb;
 } NEImageDesc;
 
 /* ======================================================================== */
@@ -50,26 +53,26 @@ typedef struct NEImageDesc {
 /**
  * Create a GPU image buffer.
  *
- * Returns NE_BUFFER_HANDLE_NULL on failure.
+ * Returns NE_IMAGE_HANDLE_NULL on failure.
  */
 NEImageHandle ne_image_create(NERenderer *renderer, const NEImageDesc *desc);
 
 /**
- * Create a GPU image buffer from file.
+ * Load a file as a sampled, sRGB RGBA image (currently Vulkan only).
  *
- * Returns NE_BUFFER_HANDLE_NULL on failure.
+ * Returns NE_IMAGE_HANDLE_NULL on failure.
  */
 NEImageHandle ne_image_load(NERenderer *renderer, const char* filename);
 
 /**
- * Update a region of an existing buffer.
+ * Replace the complete image with tightly packed pixels.
  *
  * Parameters:
  * - `data`   : Source data to copy.
- * - `size`   : Number of bytes to copy.
- * - `offset` : Byte offset into the buffer.
+ * - `size`   : Must equal width * height * format.
  *
- * The update is staged and applied before the next draw that uses the buffer.
+ * The Vulkan update is staged synchronously. It preserves the image's tracked
+ * layout and returns it to shader-readable (or storage) use.
  */
 void ne_image_update(NERenderer *renderer, NEImageHandle handle, const void *data, uint32_t size);
 

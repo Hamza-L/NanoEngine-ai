@@ -32,6 +32,7 @@ typedef struct NEVulkanBufferSlot {
         };
     };
     VkDeviceMemory memory;
+    VkImageLayout image_layout; /* meaningful only for image slots */
 
     VkBuffer dyn_buffers[NE_VK_MAX_FRAMES_IN_FLIGHT];
     VkDeviceMemory dyn_memories[NE_VK_MAX_FRAMES_IN_FLIGHT];
