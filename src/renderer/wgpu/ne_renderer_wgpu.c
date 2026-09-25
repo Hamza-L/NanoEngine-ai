@@ -94,6 +94,10 @@ static inline uint32_t ne_buffer_slot_copy_count(const NEBufferSlot *slot) {
 
 /* ── Renderer ───────────────────────────────────────────────────────────── */
 
+typedef struct NEDeviceRequest {
+    NERenderer *renderer; /* NULL after destruction; owned by the callback chain */
+} NEDeviceRequest;
+
 struct NERenderer {
     WGPUInstance instance;
     WGPUAdapter adapter;
@@ -108,6 +112,7 @@ struct NERenderer {
      */
     bool device_ready;
     bool device_failed;
+    NEDeviceRequest *device_request;
 
     NEPool shaders;
     NEPool buffers;
@@ -172,11 +177,19 @@ static NERenderPass g_active_pass = {0};
 static void ne_wgpu_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
                               WGPUStringView message, void *userdata1, void *userdata2) {
     (void)userdata2;
-    NERenderer *renderer = (NERenderer *)userdata1;
+    NEDeviceRequest *request = userdata1;
+    NERenderer *renderer = request->renderer;
+    free(request);
+    if (!renderer) {
+        if (device) wgpuDeviceRelease(device);
+        return;
+    }
+    renderer->device_request = NULL;
     if (status != WGPURequestDeviceStatus_Success || !device) {
         NE_LOG_ERROR("WebGPU device request failed: %.*s",
                      (int)message.length, message.data ? message.data : "");
         renderer->device_failed = true;
+        if (device) wgpuDeviceRelease(device);
         return;
     }
     renderer->device = device;
@@ -188,11 +201,20 @@ static void ne_wgpu_on_device(WGPURequestDeviceStatus status, WGPUDevice device,
 static void ne_wgpu_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adapter,
                                WGPUStringView message, void *userdata1, void *userdata2) {
     (void)userdata2;
-    NERenderer *renderer = (NERenderer *)userdata1;
+    NEDeviceRequest *request = userdata1;
+    NERenderer *renderer = request->renderer;
+    if (!renderer) {
+        if (adapter) wgpuAdapterRelease(adapter);
+        free(request);
+        return;
+    }
     if (status != WGPURequestAdapterStatus_Success || !adapter) {
         NE_LOG_ERROR("WebGPU adapter request failed: %.*s",
                      (int)message.length, message.data ? message.data : "");
         renderer->device_failed = true;
+        renderer->device_request = NULL;
+        if (adapter) wgpuAdapterRelease(adapter);
+        free(request);
         return;
     }
     renderer->adapter = adapter;
@@ -204,7 +226,7 @@ static void ne_wgpu_on_adapter(WGPURequestAdapterStatus status, WGPUAdapter adap
     memset(&cb, 0, sizeof(cb));
     cb.mode = WGPUCallbackMode_AllowSpontaneous;
     cb.callback = ne_wgpu_on_device;
-    cb.userdata1 = renderer;
+    cb.userdata1 = request;
     wgpuAdapterRequestDevice(adapter, &device_desc, cb);
 }
 
@@ -224,6 +246,13 @@ NERenderer *ne_renderer_create(const NERendererDesc *desc) {
     }
 
     renderer->surface_format = WGPUTextureFormat_Undefined;
+    renderer->device_request = calloc(1, sizeof(NEDeviceRequest));
+    if (!renderer->device_request) {
+        wgpuInstanceRelease(renderer->instance);
+        free(renderer);
+        return NULL;
+    }
+    renderer->device_request->renderer = renderer;
 
     /*
      * Kick off the async adapter → device chain. The renderer is returned
@@ -237,7 +266,7 @@ NERenderer *ne_renderer_create(const NERendererDesc *desc) {
     memset(&cb, 0, sizeof(cb));
     cb.mode = WGPUCallbackMode_AllowSpontaneous;
     cb.callback = ne_wgpu_on_adapter;
-    cb.userdata1 = renderer;
+    cb.userdata1 = renderer->device_request;
     wgpuInstanceRequestAdapter(renderer->instance, &adapter_opts, cb);
 
     return renderer;
@@ -276,6 +305,12 @@ static void ne_pipeline_slot_release(NEPipelineSlot *slot) {
 void ne_renderer_destroy(NERenderer *renderer) {
     if (!renderer) {
         return;
+    }
+    /* Pending callbacks own the small request record, never a freed renderer.
+     * They release any late adapter/device result and then free that record. */
+    if (renderer->device_request) {
+        renderer->device_request->renderer = NULL;
+        renderer->device_request = NULL;
     }
 
     for (uint32_t i = 0; i < renderer->shaders.cap; i++) {
