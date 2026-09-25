@@ -12,6 +12,7 @@
 /* Shader management */
 extern PFN_vkCreateShaderModule vkCreateShaderModule;
 extern PFN_vkDestroyShaderModule vkDestroyShaderModule;
+static bool glslang_ready;
 
 
 /* ========================================================================
@@ -39,11 +40,9 @@ extern PFN_vkDestroyShaderModule vkDestroyShaderModule;
  *
  * Runtime source compilation
  * ──────────────────────────
- * The API header documents a future Slang → SPIR-V path.  Until Slang is
- * integrated, ne_shader_create_from_source() is an explicit no-op stub: it
- * logs a clear actionable warning and returns NE_SHADER_HANDLE_NULL.  This
- * mirrors the Metal backend's compute pipeline stubs exactly, making the
- * future integration point obvious.
+ * glslang compiles supplied GLSL text. A filename is a diagnostic label when
+ * source is provided, or a file to read when source is NULL. Compiler calls
+ * are serialized on the renderer's owning thread.
  */
 
 NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc) {
@@ -101,7 +100,12 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
         return NE_SHADER_HANDLE_NULL;
     }
 
-    const char *filename = desc->filename;
+    const char *filename = desc->filename ? desc->filename : "<memory>";
+    NEShaderHandle handle = NE_SHADER_HANDLE_NULL;
+    void *owned_source = NULL;
+    void *spirv_bytes = NULL;
+    glslang_shader_t *shader = NULL;
+    glslang_program_t *program = NULL;
 
     glslang_stage_t stage = {};
     if(desc->stage == NE_SHADER_STAGE_VERTEX) stage = GLSLANG_STAGE_VERTEX;
@@ -109,14 +113,24 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     else if(desc->stage == NE_SHADER_STAGE_COMPUTE) stage = GLSLANG_STAGE_COMPUTE;
     else { return NE_SHADER_HANDLE_NULL;}
 
-    static bool glslang_ready = false;
     if (!glslang_ready) {
-        glslang_initialize_process();
+        if (!glslang_initialize_process()) {
+            NE_LOG_ERROR("failed to initialize glslang");
+            return handle;
+        }
         glslang_ready = true;
     }
 
-    size_t size = 0;
-    void *src = ne_file_read(filename, &size);
+    const char *source = desc->source;
+    if (!source) {
+        size_t source_size = 0;
+        owned_source = ne_file_read(desc->filename, &source_size);
+        source = owned_source;
+        if (!source || source_size == 0) {
+            NE_LOG_ERROR("unable to read shader source: %s", filename);
+            goto cleanup;
+        }
+    }
 
     glslang_input_t input = {
 	.language = GLSLANG_SOURCE_GLSL,
@@ -127,14 +141,17 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
     .default_profile = GLSLANG_NO_PROFILE,
 	.default_version = 450,
     .stage = stage,
-    .code = src,
+    .code = source,
     .force_default_version_and_profile = false,
     .forward_compatible = false,
     .messages = GLSLANG_MSG_DEFAULT_BIT | GLSLANG_MSG_DEBUG_INFO_BIT,
     .resource = glslang_default_resource(),
 };
 
-    glslang_shader_t *shader = glslang_shader_create(&input);
+    shader = glslang_shader_create(&input);
+    if (!shader) {
+        goto cleanup;
+    }
 	glslang_shader_set_entry_point(shader, desc->entry_point);
 
 	if (!glslang_shader_preprocess(shader, &input))	{
@@ -142,51 +159,66 @@ NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShader
 		NE_LOG_ERROR("%s\n", glslang_shader_get_info_log(shader));
 		NE_LOG_ERROR("%s\n", glslang_shader_get_info_debug_log(shader));
 		NE_LOG_ERROR("%s\n", input.code);
-		glslang_shader_delete(shader);
-		return NE_SHADER_HANDLE_NULL;
+		goto cleanup;
 	}
 
+    input.code = glslang_shader_get_preprocessed_code(shader);
     if (!glslang_shader_parse(shader, &input)) {
         NE_LOG_ERROR("GLSL parsing failed %s\n", filename);
         NE_LOG_ERROR("%s\n", glslang_shader_get_info_log(shader));
         NE_LOG_ERROR("%s\n", glslang_shader_get_info_debug_log(shader));
         NE_LOG_ERROR("%s\n", glslang_shader_get_preprocessed_code(shader));
-        glslang_shader_delete(shader);
-        return NE_SHADER_HANDLE_NULL;
+        goto cleanup;
     }
 
-	glslang_program_t* program = glslang_program_create();
+	program = glslang_program_create();
+    if (!program) {
+        goto cleanup;
+    }
     glslang_program_add_shader(program, shader);
 
     if (!glslang_program_link(program, GLSLANG_MSG_SPV_RULES_BIT | GLSLANG_MSG_VULKAN_RULES_BIT)) {
         NE_LOG_ERROR("GLSL linking failed %s\n", filename);
         NE_LOG_ERROR("%s\n", glslang_program_get_info_log(program));
         NE_LOG_ERROR("%s\n", glslang_program_get_info_debug_log(program));
-        glslang_program_delete(program);
-        glslang_shader_delete(shader);
-        return NE_SHADER_HANDLE_NULL;
+        goto cleanup;
     }
 
-    glslang_program_SPIRV_generate(program, stage);
+    glslang_spv_options_t options = {
+        .generate_debug_info = renderer->shader_optimization == NE_SHADER_OPTIMIZATION_NONE,
+        .disable_optimizer = renderer->shader_optimization == NE_SHADER_OPTIMIZATION_NONE,
+        .optimize_size = renderer->shader_optimization == NE_SHADER_OPTIMIZATION_SIZE,
+        .optimize_performance = renderer->shader_optimization == NE_SHADER_OPTIMIZATION_PERFORMANCE,
+        .validate = true,
+    };
+    glslang_program_SPIRV_generate_with_options(program, stage, &options);
 
-    size_t sprv_size = glslang_program_SPIRV_get_size(program) * sizeof(uint32_t);
-    void* sprv_bytes = malloc(sprv_size);
-    glslang_program_SPIRV_get(program, sprv_bytes);
+    size_t word_count = glslang_program_SPIRV_get_size(program);
+    if (word_count == 0 || word_count > SIZE_MAX / sizeof(uint32_t)) {
+        goto cleanup;
+    }
+    size_t spirv_size = word_count * sizeof(uint32_t);
+    spirv_bytes = malloc(spirv_size);
+    if (!spirv_bytes) {
+        goto cleanup;
+    }
+    glslang_program_SPIRV_get(program, spirv_bytes);
 
     const char* spirv_messages = glslang_program_SPIRV_get_messages(program);
     if (spirv_messages) NE_LOG_INFO("(%s) %s\b", filename, spirv_messages);
 
-    const NEShaderHandle handle = ne_shader_create(renderer, &(NEShaderDesc){
+    handle = ne_shader_create(renderer, &(NEShaderDesc){
         .stage         = desc->stage,
-        .bytecode      = sprv_bytes,
-        .bytecode_size = sprv_size,
+        .bytecode      = spirv_bytes,
+        .bytecode_size = spirv_size,
         .entry_point   = desc->entry_point,
     });
 
-    free(sprv_bytes);
-    glslang_program_delete(program);
-    glslang_shader_delete(shader);
-    ne_file_free(src);
+cleanup:
+    free(spirv_bytes);
+    if (program) glslang_program_delete(program);
+    if (shader) glslang_shader_delete(shader);
+    ne_file_free(owned_source);
 
     return handle;
 }
@@ -234,5 +266,8 @@ void ne_shader_destroy_all(NERenderer *r) {
     }
     ne_pool_destroy(&r->shaders);
 
-    glslang_finalize_process();
+    if (glslang_ready) {
+        glslang_finalize_process();
+        glslang_ready = false;
+    }
 }

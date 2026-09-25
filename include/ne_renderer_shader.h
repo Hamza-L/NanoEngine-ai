@@ -43,7 +43,7 @@ typedef enum NEShaderStage {
  * which prioritises fast compile times and accurate error reporting.
  *
  * Backend mapping:
- *   Vulkan (shaderc) :  NONE        → -O0 (no optimisation)
+ *   Vulkan (glslang) :  NONE        → no optimisation
  *                       SIZE        → -Os (optimise for binary size)
  *                       PERFORMANCE → -O  (optimise for GPU throughput)
  *   Metal            :  NONE / SIZE → fastMathEnabled = NO
@@ -99,7 +99,7 @@ typedef struct NEShaderDesc {
 typedef struct NEShaderSourceDesc {
     NEShaderStage stage;
 
-    /** Null-terminated shader source (GLSL on Vulkan, MSL on Metal). */
+    /** Null-terminated shader source (GLSL on Vulkan, MSL on Metal, WGSL on web). */
     const char *source;
 
     /** Entry-point function name within the source. */
@@ -135,7 +135,9 @@ NEShaderHandle ne_shader_create(NERenderer *renderer, const NEShaderDesc *desc);
  * Create a shader by compiling source code at runtime.
  *
  * Returns NE_SHADER_HANDLE_NULL on failure.
- * On Vulkan, requires shaderc_shared.dll to be present next to the executable.
+ * Vulkan uses the linked glslang compiler. If source is NULL, its filename
+ * fallback loads GLSL from disk. Metal and web require source text.
+ * Call on the renderer's owning thread; compilation is currently synchronous.
  */
 NEShaderHandle ne_shader_create_from_source(NERenderer *renderer, const NEShaderSourceDesc *desc);
 
