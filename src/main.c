@@ -236,11 +236,22 @@ int main(void) {
 
     /* ── Renderer + surface ────────────────────────────────────────────── */
     NERenderer *renderer = ne_renderer_create( &(NERendererDesc){.enable_validation = true});
+    if (!renderer) {
+        ne_window_destroy(window);
+        ne_app_destroy(app);
+        return 1;
+    }
     NERenderSurface *surface = ne_renderer_create_surface(renderer, window,
                                                           &(NERenderSurfaceDesc){
                                                           .vsync = true,
                                                           .clear_color_rgba = {0.0f, 0.0f, 0.0f, 0.0f},
                                                           .present_backend = NE_PRESENT_BACKEND_DXGI});
+    if (!surface) {
+        ne_renderer_destroy(renderer);
+        ne_window_destroy(window);
+        ne_app_destroy(app);
+        return 1;
+    }
 
     NEPipelineHandle pipeline = NE_PIPELINE_HANDLE_NULL;
     NEBufferHandle vbo = NE_BUFFER_HANDLE_NULL;
@@ -286,6 +297,9 @@ int main(void) {
     ne_app_run(app);
 
     /* ── Cleanup ───────────────────────────────────────────────────────── */
+    ne_set_window_render_dispatch(window, NULL, NULL);
+    ne_renderer_destroy_surface(renderer, surface);
+    ne_buffer_destroy(renderer, frame_ctx.vertex_buffer);
     ne_pipeline_destroy(renderer, frame_ctx.pipeline);
     ne_renderer_destroy(renderer);
     ne_window_destroy(window);
