@@ -36,18 +36,18 @@ typedef struct NERendererDesc {
  *
  * Controls how swapchain images are presented to the window:
  *
- * - DEFAULT / VULKAN_WSI: The driver creates and manages the swapchain via
- *   vkCreateSwapchainKHR. This is the standard Vulkan presentation path.
- *
- * - DXGI: The engine creates its own DXGI swapchain with DirectComposition.
+ * - DEFAULT / DXGI: The engine creates its own DXGI swapchain with DirectComposition.
  *   Swapchain images are imported into Vulkan via VK_KHR_external_memory_win32.
  *   This gives full control over alpha compositing (transparency) and DXGI
  *   presentation parameters.
+ *
+ * - VULKAN_WSI: The driver creates and manages the swapchain via
+ *   vkCreateSwapchainKHR. This is the standard Vulkan presentation path.
  */
 typedef enum NEPresentBackend {
     NE_PRESENT_BACKEND_DEFAULT = 0,
-    NE_PRESENT_BACKEND_VULKAN_WSI = 0,
-    NE_PRESENT_BACKEND_DXGI = 1,
+    NE_PRESENT_BACKEND_DXGI = 0,
+    NE_PRESENT_BACKEND_VULKAN_WSI = 1,
 } NEPresentBackend;
 
 /**
